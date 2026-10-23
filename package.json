@@ -1,6 +1,6 @@
 {
   "name": "Libris",
-  "version": "1.11.0",
+  "version": "1.2.0",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build:hosting": "node build-hosting.js",
