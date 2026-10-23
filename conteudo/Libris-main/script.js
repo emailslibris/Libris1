@@ -20,13 +20,7 @@ const config = {
   coordinationDays: 7,
   maxBooksStudent: 2,
   maxBooksTeacher: 35,
-  teacherLoanDays: 21,
-  emailjs: { 
-    serviceId: 'service_kj4o9me', 
-    studentTemplateId: 'template_7jhtc1d', 
-    coordinationTemplateId: 'template_05hf89g', 
-    publicKey: '3NnWny8jJqnZwiFWU' 
-  }
+  teacherLoanDays: 21
 }
 
 const defaultCategories = []
@@ -595,58 +589,6 @@ function openWhatsAppMessage(reader, message) {
   return true
 }
 
-async function sendEmailNotification(reader, message, loan, recipient = reader, templateId = config.emailjs.studentTemplateId) {
-  const email = String(recipient?.email || '').trim()
-  if (!email) {
-    toast('Endereço de e-mail não informado.', 'error')
-    return false
-  }
-
-  const emailjsReady = typeof window !== 'undefined' && !!window.emailjs
-  const serviceId = config.emailjs.serviceId
-  const publicKey = config.emailjs.publicKey
-  const dueDate = loan ? formatDate(loan.dueAt) : '—'
-
-  let diasAtraso = 0
-  if (loan && loan.dueAt) {
-    const due = date(loan.dueAt)
-    const today = new Date()
-    if (due < today) {
-      const diffTime = Math.abs(today - due)
-      diasAtraso = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-    }
-  }
-
-  if (!emailjsReady || !serviceId || !templateId || !publicKey) {
-    toast('Serviço do EmailJS não está configurado corretamente.', 'error')
-    return false
-  }
-
-  try {
-    window.emailjs.init({ publicKey })
-    await window.emailjs.send(serviceId, templateId, {
-      to_email: email,
-      to_name: recipient?.name || reader?.name || 'Leitor',
-      subject: 'Aviso da Biblioteca',
-      message: message,
-      school_name: config.schoolName,
-      escola: config.schoolName,
-      organization: config.organizationName,
-      name: reader?.name || 'Leitor',
-      livro: loan?.bookTitle || '',
-      loan_days: Number(loan?.days || 0),
-      data_vencimento: dueDate,
-      date: dueDate,
-      dias_atraso: diasAtraso
-    })
-    return true
-  } catch (error) {
-    console.error('Falha no EmailJS:', error)
-    toast('Erro ao enviar e-mail..', 'error')
-    return false
-  }
-}
-
 async function triggerNotification(type) {
   const notificationModal = $('#notificationModal')
   const loanId = notificationModal?.dataset.loanId
@@ -659,26 +601,7 @@ async function triggerNotification(type) {
   }
 
   if (type === 'coordination') {
-    const coordEmail = (config.coordinationEmail || $('#coordinationEmailInput')?.value || '').trim()
-
-    if (!coordEmail) {
-      return toast('Cadastre e salve o e-mail da coordenação nas configurações da escola.', 'error')
-    }
-
-    const coordination = { 
-      name: 'Coordenação', 
-      email: coordEmail 
-    }
-
-    const coordinationMessage = `Olá, coordenação. O empréstimo do livro "${loan.bookTitle}" para o(a) leitor(a) ${loan.readerName} está em atraso desde ${formatDate(loan.dueAt)}.`
-    const templateId = config.emailjs.coordinationTemplateId || config.emailjs.studentTemplateId
-
-    const sent = await sendEmailNotification(reader, coordinationMessage, loan, coordination, templateId)
-
-    if (!sent) return
-    toast('Aviso enviado à coordenação com sucesso!')
-    modal('notificationModal', false)
-    return
+    return toast('O envio de e-mails está disponível somente no aplicativo desktop Libris.')
   }
 
   if (type === 'whatsapp') {
@@ -690,15 +613,7 @@ async function triggerNotification(type) {
     return
   }
 
-  if (!reader.email || !reader.email.trim()) {
-    return toast(`O leitor ${reader.name} não possui e-mail cadastrado na aba Leitores.`, 'error')
-  }
-
-  const sent = await sendEmailNotification(reader, message, loan, reader, config.emailjs.studentTemplateId)
-
-  if (!sent) return
-  toast('E-mail enviado ao leitor com sucesso!')
-  modal('notificationModal', false)
+  return toast('O envio de e-mails está disponível somente no aplicativo desktop Libris.')
 }
 
 /* -------------------------
@@ -1871,9 +1786,6 @@ function setup() {
 
   if ($('#copyNotificationBtn')) $('#copyNotificationBtn').onclick = async () => { try { await navigator.clipboard.writeText($('#notificationMessage')?.value || ''); toast('Mensagem copiada.') } catch { toast('Não foi possível copiar.', 'error') } }
   if ($('#sendWhatsappBtn')) $('#sendWhatsappBtn').onclick = () => triggerNotification('whatsapp')
-  if ($('#sendEmailBtn')) $('#sendEmailBtn').onclick = () => triggerNotification('email')
-  if ($('#sendCoordinationBtn')) $('#sendCoordinationBtn').onclick = () => triggerNotification('coordination')
-
   if ($('#logoutBtn')) $('#logoutBtn').onclick = async () => {
     resetAdminState()
     modal('loginModal', true)
@@ -1892,10 +1804,6 @@ function fillLibrisConfigurationForm(school = {}) {
   if ($('#librisSchoolIdInput')) $('#librisSchoolIdInput').value = school.id || ''
   if ($('#librisSchoolNameInput')) $('#librisSchoolNameInput').value = school.name || ''
   if ($('#librisAuthorizedEmailsInput')) $('#librisAuthorizedEmailsInput').value = (school.authorizedEmails || []).join('\n')
-  if ($('#librisEmailServiceInput')) $('#librisEmailServiceInput').value = school.emailjs?.serviceId || ''
-  if ($('#librisStudentTemplateInput')) $('#librisStudentTemplateInput').value = school.emailjs?.studentTemplateId || ''
-  if ($('#librisCoordinationTemplateInput')) $('#librisCoordinationTemplateInput').value = school.emailjs?.coordinationTemplateId || ''
-  if ($('#librisEmailPublicKeyInput')) $('#librisEmailPublicKeyInput').value = school.emailjs?.publicKey || ''
 }
 
 async function saveLibrisConfiguration(event) {
@@ -1916,12 +1824,6 @@ async function saveLibrisConfiguration(event) {
     schoolId,
     name: schoolName,
     authorizedEmails,
-    emailjs: {
-      serviceId: $('#librisEmailServiceInput')?.value.trim() || '',
-      studentTemplateId: $('#librisStudentTemplateInput')?.value.trim() || '',
-      coordinationTemplateId: $('#librisCoordinationTemplateInput')?.value.trim() || '',
-      publicKey: $('#librisEmailPublicKeyInput')?.value.trim() || ''
-    },
     active: true,
     updatedAt: new Date()
   }
@@ -1931,7 +1833,10 @@ async function saveLibrisConfiguration(event) {
     if (existingSchools.length && !existingSchools.some((item) => item.id === schoolId)) {
       return toast('Este computador já está configurado para outra escola. Não altere o identificador por aqui.', 'error')
     }
-    await setDoc(doc(db, 'schools', schoolId), school, { merge: true })
+    const existingSchool = existingSchools.find((item) => item.id === schoolId) || {}
+    const existingSchoolSettings = { ...existingSchool }
+    delete existingSchoolSettings.emailjs
+    await setDoc(doc(db, 'schools', schoolId), { ...existingSchoolSettings, ...school })
     const existingUsers = await localStore.list('users')
     for (const user of existingUsers.filter((item) => item.schoolId === schoolId && item.email)) {
       const active = authorizedEmails.includes(String(user.email).toLowerCase())
@@ -1942,7 +1847,6 @@ async function saveLibrisConfiguration(event) {
     }
     config.currentSchoolId = schoolId
     config.schoolName = schoolName
-    config.emailjs = school.emailjs
     toast('Configuração local salva. Os emails autorizados podem entrar nesta máquina.')
   } catch (err) {
     error(err, 'Não foi possível salvar a configuração local.')
@@ -2053,7 +1957,6 @@ async function loadSchoolData(schoolId = config.currentSchoolId) {
       config.maxBooksStudent = Number(data.maxBooksStudent ?? 2)
       config.maxBooksTeacher = Number(data.maxBooksTeacher ?? 35)
       config.teacherLoanDays = Number(data.teacherLoanDays ?? 21)
-      if (data.emailjs) config.emailjs = { ...config.emailjs, ...data.emailjs }
     } else {
       return false
     }

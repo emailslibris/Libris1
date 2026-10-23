@@ -14,7 +14,7 @@ O painel usa IndexedDB para guardar livros, leitores, empréstimos, contas locai
 - A sessão permanece salva neste computador até a pessoa sair. Limpar os dados do navegador/aplicativo encerra a sessão e exige restaurar um backup.
 - O botão **Importar** aceita um CSV legado de livros ou um ZIP completo de backup com arquivos CSV. Categorias ausentes do CSV legado são criadas usando o prefixo do código do livro; a escola de origem é remapeada para a escola configurada.
 - O botão **Exportar** gera um backup completo ZIP com CSVs para salvar no computador. Para restaurar, use **Importar** e selecione o ZIP. Os CSVs não incluem senhas nem hashes de senha; a restauração mantém as contas locais já cadastradas no computador. Guarde uma cópia do ZIP em um local seguro.
-- A cota de 10 emails por escola/mês é contada no armazenamento local daquela instalação. Os livros com maior atraso aparecem primeiro; avisos de alunos por email são encaminhados à coordenação. A cota não é sincronizada entre vários computadores da mesma escola.
+- A senha SMTP fica no cofre de credenciais do sistema operacional, separada do IndexedDB e dos backups. Os últimos 100 e-mails enviados por escola são auditados localmente, sem armazenar o corpo da mensagem.
 
 Mantenha cópias dos arquivos antigos até confirmar a importação do CSV e testar a restauração do backup completo.
 
@@ -23,7 +23,7 @@ Mantenha cópias dos arquivos antigos até confirmar a importação do CSV e tes
 1. No Firebase Console do projeto `librisce`, habilite **Authentication > Email/Password** para a conta administrativa CREDE. Adicione o domínio HTTPS publicado em **Authorized domains**.
 2. Em **Authentication > Users**, crie `admin@crede17.ce.gov.br` com uma senha nova, forte e exclusiva. A senha digitada no app é validada pelo Firebase Authentication; ela não está no código. Como a senha anterior foi compartilhada em conversa, não a reutilize.
 3. No computador da biblioteca, use **Configuração local (CREDE)** e entre com `admin@crede17.ce.gov.br` e a senha criada no Firebase.
-4. Cadastre a escola, o email da coordenação, as contas locais e os parâmetros EmailJS. Os valores iniciais são `service_Libris`, `template_LibrisA`, `template_LibrisC` e a chave pública `3NnWny8jJqnZwiFWU`.
+4. Cadastre a escola, o email da coordenação, as contas locais e as configurações SMTP institucionais. A senha de app é salva no cofre seguro do sistema no aplicativo desktop.
 
 As contas locais da escola são independentes do Firebase Authentication; a senha administrativa CREDE continua sendo gerenciada pelo Firebase.
 
@@ -35,7 +35,7 @@ Para trazer o acervo do site antigo, selecione o CSV em **Importar**. Os nomes d
 
 Ao cadastrar um livro, o sistema busca automaticamente capa e descrição pelo título, autor e editora. A primeira fonte é o Google Books; se não houver resultado, ele tenta a Open Library. Se nenhuma fonte encontrar o livro, o cadastro continua normalmente sem esses dados.
 
-Os avisos são enviados pelo EmailJS após ação do administrador, não em segundo plano. **Avisar leitor por e-mail** envia ao endereço cadastrado para o leitor; **Avisar coordenação** envia à coordenação escolar. Há limite local de 10 mensagens por mês por escola e o painel prioriza visualmente os empréstimos com maior atraso. Esse limite não pode ser compartilhado entre computadores sem um serviço central. Os templates devem aceitar `to_email`, `to_name`, `subject`, `message`, `school_name`, `organization`, `livro`, `loan_days`, `data_vencimento` e `dias_atraso`.
+Os avisos de e-mail são enviados manualmente pelo aplicativo desktop através do servidor SMTP configurado pela CREDE. **Avisar leitor por e-mail** envia ao endereço cadastrado; **Avisar coordenação** envia à coordenação escolar. O envio exige conexão com o servidor de e-mail e aceita portas seguras 465 (TLS) ou 587 (STARTTLS). Não há cota mensal nem envio automático em segundo plano. Os últimos 100 envios de cada escola são registrados localmente.
 
 ## Executar localmente
 
@@ -46,13 +46,13 @@ npm run build:hosting
 python3 -m http.server 8080 --directory dist
 ```
 
-Abra `http://localhost:8080` no Chromium. Não abra o HTML diretamente pelo gerenciador de arquivos: módulos JavaScript e o service worker precisam de um servidor HTTP. Os dados da biblioteca são locais; conexão é necessária para login CREDE e EmailJS.
+Abra `http://localhost:8080` no Chromium. Não abra o HTML diretamente pelo gerenciador de arquivos: módulos JavaScript e o service worker precisam de um servidor HTTP. Os dados da biblioteca são locais; conexão é necessária para login CREDE e para enviar e-mails pelo SMTP institucional no desktop.
 
 ## Aplicativo desktop Tauri
 
 O desktop usa Tauri v2 e mantém a mesma interface web. A versão atual é 1.0.11. Para desenvolvimento, instale as dependências Linux do Tauri e execute `npm run tauri dev`. Para gerar o pacote Debian da versão atual, execute `npm run build:desktop`; o arquivo será criado em `src-tauri/target/release/bundle/deb/`.
 
-No Ubuntu, o build requer Rust/Cargo e os pacotes `build-essential`, `curl`, `wget`, `file`, `libssl-dev`, `libxdo-dev`, `librsvg2-dev` e `libwebkit2gtk-4.1-dev`. O login CREDE e o acesso à câmera devem ser validados no WebView do sistema após a instalação.
+No Ubuntu, o build requer Rust/Cargo e os pacotes `build-essential`, `curl`, `wget`, `file`, `libssl-dev`, `libdbus-1-dev`, `libxdo-dev`, `librsvg2-dev` e `libwebkit2gtk-4.1-dev`. O serviço de credenciais do sistema (Secret Service) deve estar disponível para guardar a senha SMTP. O login CREDE, o acesso à câmera e o envio SMTP devem ser validados no WebView do sistema após a instalação.
 
 Para ler o QR code da etiqueta, clique em **Usar câmera** e permita o acesso quando solicitado. O QR contém a escola, o identificador e o código do livro; o app procura o registro entre os livros já carregados para a escola atual. Se o acesso à câmera estiver bloqueado, feche outros programas que possam estar usando-a e confira as permissões do navegador ou do sistema.
 

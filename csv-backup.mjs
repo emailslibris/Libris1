@@ -6,8 +6,12 @@ export const backupCollectionFiles = {
   'reservas.csv': 'reservations',
   'contadores.csv': 'counters',
   'auditoria.csv': 'audit_logs',
-  'uso-emails.csv': 'email_usage',
   'escola.csv': 'schools'
+}
+
+export const optionalBackupCollectionFiles = {
+  'emails-enviados.csv': 'email_logs',
+  'uso-emails.csv': 'email_usage'
 }
 
 export const normalizeCsvHeader = (value) => String(value ?? '')

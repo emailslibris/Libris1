@@ -10,7 +10,7 @@ O PWA usa IndexedDB para livros, leitores, empréstimos, configurações e audit
 
 - Cada escola usa um computador principal; não há sincronização entre máquinas.
 - Na primeira abertura sem configuração, a primeira conta Google que entrar será a administradora Libris. Faça o primeiro login com a conta Libris no computador da escola.
-- A conta Libris configura nome, emails autorizados e EmailJS. Essa configuração fica local no computador; a conta Libris não acessa livros, leitores nem empréstimos.
+- A conta Libris configura nome e emails autorizados. Essa configuração fica local no computador; a conta Libris não acessa livros, leitores nem empréstimos.
 - O login é Google; emails fora da lista local não entram no painel escolar.
 - O botão **Enviar backup semanal** envia um JSON ao Meu Drive da mesma conta escolar. Quando o backup vencer, é necessário abrir o app e clicar no botão; o navegador não garante upload com o PWA fechado.
 - O botão **Restaurar JSON** aceita backups locais e o JSON da antiga Cloud Function.
@@ -23,7 +23,7 @@ Não apague o Firestore nem os backups legados antes de confirmar a migração e
 2. Em **Authentication > Users**, crie `admin@crede17.ce.gov.br` com uma senha nova, forte e exclusiva. A senha digitada no app é validada pelo Firebase Authentication; ela não está no código. Como a senha anterior foi compartilhada em conversa, não a reutilize.
 3. Ative a Google Drive API no Google Cloud do projeto. O app solicita o escopo `drive.file` somente quando alguém usa o botão de backup.
 4. No computador da biblioteca, entre primeiro com `admin@crede17.ce.gov.br` e a senha criada no Firebase. Essa conta abre o painel de configuração Libris.
-5. Cadastre o identificador e o nome da escola, os emails Google autorizados e os parâmetros EmailJS. Os dados ficam no IndexedDB daquele computador.
+5. Cadastre o identificador e o nome da escola e os emails Google autorizados. Os dados ficam no IndexedDB daquele computador.
 
 O login administrativo usa Firebase Authentication por email/senha. Os funcionários da escola entram com Google, e o app compara o email com a lista local autorizada. A função agendada antiga de backup continua no código de servidor e pode depender do Firestore; ela não é chamada pelo PWA.
 
@@ -41,7 +41,7 @@ O navegador só envia enquanto o app está aberto. Se a máquina ficar desligada
 
 Ao cadastrar um livro, o sistema busca automaticamente capa e descrição pelo título, autor e editora. A primeira fonte é o Google Books; se não houver resultado, ele tenta a Open Library. Se nenhuma fonte encontrar o livro, o cadastro continua normalmente sem esses dados.
 
-O aviso ao leitor funciona pelo EmailJS com o template configurado em `studentTemplateId`. O botão **Avisar coordenação** usa `coordinationTemplateId`; se ele estiver vazio, reutiliza o template do aluno. Para ativar esse aviso, adicione `coordinationEmail` ao documento da escola:
+Esta cópia PWA legada não envia e-mails. O envio SMTP está disponível apenas no aplicativo desktop Libris atual. Os avisos por WhatsApp continuam disponíveis. Para manter o contato da coordenação, configure `coordinationEmail` no documento da escola:
 
 ```json
 {
@@ -52,7 +52,7 @@ O aviso ao leitor funciona pelo EmailJS com o template configurado em `studentTe
 }
 ```
 
-Os templates do EmailJS devem aceitar estas variáveis: `to_email`, `to_name`, `subject`, `message`, `school_name`, `organization`, `livro`, `loan_days` e `data_vencimento`. O envio atual é acionado pelo administrador ao clicar no botão de notificação; ele não é um agendamento automático em segundo plano. Para avisos automáticos mesmo com o site fechado, será necessário criar uma Cloud Function ou outro serviço agendado no Firebase.
+Não há envio automático de e-mails em segundo plano.
 
 ## Executar localmente
 

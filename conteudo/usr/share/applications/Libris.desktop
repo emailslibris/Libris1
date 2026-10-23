@@ -1,9 +1,0 @@
-[Desktop Entry]
-Categories=Education;
-Comment=Biblioteca escolar com dados locais e backup no Google Drive
-Exec=libris
-StartupWMClass=libris
-Icon=libris
-Name=Libris
-Terminal=false
-Type=Application

@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' asset:; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' asset: data: blob: https:; connect-src 'self' ipc: http://ipc.localhost https://www.googleapis.com https://accounts.google.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://openlibrary.org https://api.emailjs.com https://firebaseapp.com https://firebaseinstallations.googleapis.com https://www.gstatic.com; frame-src https://*.firebaseapp.com https://accounts.google.com; object-src 'none'; base-uri 'self'"
+      "csp": "default-src 'self' asset:; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' asset: data: blob: https:; connect-src 'self' ipc: http://ipc.localhost https://www.googleapis.com https://accounts.google.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://openlibrary.org https://firebaseapp.com https://firebaseinstallations.googleapis.com https://www.gstatic.com; frame-src https://*.firebaseapp.com https://accounts.google.com; object-src 'none'; base-uri 'self'"
     }
   },
   "bundle": {

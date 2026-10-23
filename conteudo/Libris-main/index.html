@@ -62,22 +62,6 @@
               <span>Emails Google autorizados para o painel da escola</span>
               <textarea id="librisAuthorizedEmailsInput" rows="4" placeholder="um email por linha" required></textarea>
             </label>
-            <label>
-              <span>EmailJS: serviço</span>
-              <input id="librisEmailServiceInput" type="text" autocomplete="off" />
-            </label>
-            <label>
-              <span>EmailJS: template do leitor</span>
-              <input id="librisStudentTemplateInput" type="text" autocomplete="off" />
-            </label>
-            <label>
-              <span>EmailJS: template da coordenação</span>
-              <input id="librisCoordinationTemplateInput" type="text" autocomplete="off" />
-            </label>
-            <label>
-              <span>EmailJS: chave pública</span>
-              <input id="librisEmailPublicKeyInput" type="text" autocomplete="off" />
-            </label>
             <div class="settings-actions">
               <button class="btn btn-primary" type="submit">Salvar configuração local</button>
             </div>
@@ -466,8 +450,6 @@
         <div style="display:flex; flex-wrap:wrap; gap:0.65rem; margin-top:0.8rem;">
           <button class="btn btn-primary" type="button" id="copyNotificationBtn">Copiar mensagem</button>
           <button class="btn btn-ghost" type="button" id="sendWhatsappBtn">Enviar por WhatsApp</button>
-          <button class="btn btn-secondary" type="button" id="sendEmailBtn">Enviar por e-mail</button>
-          <button class="btn btn-secondary" type="button" id="sendCoordinationBtn">Avisar coordenação</button>
         </div>
       </div>
     </div>
@@ -620,7 +602,6 @@
 
     <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
     <script type="module" src="script.js"></script>
   </body>
 </html>

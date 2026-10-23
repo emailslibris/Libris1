@@ -68,22 +68,35 @@
               <div id="localAccountsList" class="local-accounts-list"></div>
               <button class="btn btn-secondary" id="addLocalAccountBtn" type="button">Adicionar conta</button>
             </div>
-            <label>
-              <span>EmailJS: serviço</span>
-              <input id="librisEmailServiceInput" type="text" autocomplete="off" />
-            </label>
-            <label>
-              <span>EmailJS: template do leitor</span>
-              <input id="librisStudentTemplateInput" type="text" autocomplete="off" />
-            </label>
-            <label>
-              <span>EmailJS: template da coordenação</span>
-              <input id="librisCoordinationTemplateInput" type="text" autocomplete="off" />
-            </label>
-            <label>
-              <span>EmailJS: chave pública</span>
-              <input id="librisEmailPublicKeyInput" type="text" autocomplete="off" />
-            </label>
+            <fieldset class="smtp-settings">
+              <legend>Configurações de servidor de e-mail (SMTP)</legend>
+              <p class="field-help">Os avisos são enviados manualmente pelo aplicativo desktop. A senha fica no cofre seguro do sistema e não é incluída em backups.</p>
+              <div class="form-grid">
+                <label>
+                  <span>Host SMTP</span>
+                  <input id="librisSmtpHostInput" type="text" placeholder="smtp.escola.edu.br" autocomplete="url" />
+                </label>
+                <label>
+                  <span>Porta segura</span>
+                  <select id="librisSmtpPortInput">
+                    <option value="587">587 — STARTTLS</option>
+                    <option value="465">465 — TLS</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Usuário / e-mail institucional</span>
+                  <input id="librisSmtpUsernameInput" type="email" placeholder="biblioteca@escola.edu.br" autocomplete="username" />
+                </label>
+                <label>
+                  <span>Senha de app</span>
+                  <input id="librisSmtpPasswordInput" type="password" placeholder="Deixe vazio para manter a senha salva" autocomplete="new-password" />
+                </label>
+              </div>
+              <div class="smtp-credential-actions">
+                <p id="librisSmtpCredentialStatus" class="field-help" role="status" aria-live="polite">A senha não é lida de volta para esta tela.</p>
+                <button class="btn btn-secondary" id="removeSmtpPasswordBtn" type="button">Remover senha salva</button>
+              </div>
+            </fieldset>
             <div class="settings-actions">
               <button class="btn btn-primary" type="submit">Salvar configuração local</button>
             </div>
@@ -136,6 +149,9 @@
           </div>
 
           <div class="admin-tabs">
+            <div class="admin-back-row">
+              <button class="btn btn-secondary admin-back-button" id="backToLoansBtn" type="button" hidden>⬅ Voltar</button>
+            </div>
             <div class="tab-buttons">
               <button class="tab-btn is-active" data-tab="checkout" type="button">Empréstimos</button>
               <button class="tab-btn" data-tab="acervo" type="button">Acervo</button>
@@ -221,9 +237,9 @@
                   <h3>Acervo</h3>
                 </div>
                 <div class="action-row">
+                  <button class="btn btn-secondary" type="button" id="openCategoryModalBtn">+ Nova Categoria</button>
                   <button class="btn btn-secondary" type="button" id="openBookLabelsBtn">Etiquetas QR</button>
                   <button class="btn btn-primary" type="button" id="openBookModalBtn">+ Adicionar Novo Livro</button>
-                  <button class="btn btn-secondary" type="button" id="openCategoryModalBtn">+ Nova Categoria</button>
                 </div>
               </div>
 
@@ -496,7 +512,7 @@
         <button class="modal-close" type="button" data-close="notificationModal">×</button>
         <h3>Notificar leitor</h3>
         <p id="notificationContact"></p>
-        <p id="monthlyEmailStatus" class="modal-description"></p>
+        <p id="notificationEmailStatus" class="modal-description" role="status" aria-live="polite"></p>
         <label><span>Mensagem sugerida</span><textarea id="notificationMessage" rows="5"></textarea></label>
         <div style="display:flex; flex-wrap:wrap; gap:0.65rem; margin-top:0.8rem;">
           <button class="btn btn-primary" type="button" id="copyNotificationBtn">Copiar mensagem</button>
@@ -541,10 +557,11 @@
             <span>Editora</span>
             <input id="bookPublisherInput" type="text" placeholder="Ex: Companhia das Letras" />
           </label>
-          <label>
-            <span>Categoria</span>
+          <div class="book-category-field">
+            <span class="field-label">Categoria</span>
+            <button class="btn btn-secondary" id="openCategoryFromBookBtn" type="button">+ Nova Categoria</button>
             <select id="bookCategoryInput" aria-label="Categoria do livro"></select>
-          </label>
+          </div>
           <label>
             <span>Ano</span>
             <input id="bookYearInput" type="number" min="0" max="2500" value="2026" />
@@ -645,7 +662,6 @@
 
     <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
     <script type="module" src="script.js"></script>
   </body>
 </html>

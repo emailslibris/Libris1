@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import * as XLSX from 'xlsx'
-import { backupCollectionFiles, backupRecordFromRow, csvFromRows, resolveLegacyCategory } from '../csv-backup.mjs'
+import { backupCollectionFiles, backupRecordFromRow, csvFromRows, optionalBackupCollectionFiles, resolveLegacyCategory } from '../csv-backup.mjs'
 
 test('exporta o modelo de acervo CSV e preserva valores com separadores e aspas', () => {
   const rows = [
@@ -34,9 +34,9 @@ test('reconhece os conjuntos CSV necessários para restaurar backup completo', (
     'reservations',
     'counters',
     'audit_logs',
-    'email_usage',
     'schools'
   ])
+  assert.deepEqual(Object.values(optionalBackupCollectionFiles), ['email_logs', 'email_usage'])
   assert.equal(backupRecordFromRow(['id', 'schoolId', 'active'], ['user-1', 'escola_1', 'false'], 'readers').active, false)
 })
 

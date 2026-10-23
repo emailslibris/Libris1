@@ -8,19 +8,13 @@ import { writeFile } from '@tauri-apps/plugin-fs'
 import { open } from '@tauri-apps/plugin-shell'
 import { createLocalStore } from './local-store.mjs'
 import { createLocalDataApi } from './local-data.mjs'
-import { backupCollectionFiles, backupRecordFromRow, parseBackupCell, resolveLegacyCategory } from './csv-backup.mjs'
+import { backupCollectionFiles, optionalBackupCollectionFiles, backupRecordFromRow, parseBackupCell, resolveLegacyCategory } from './csv-backup.mjs'
 import * as XLSX from 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm'
 
 const localStore = createLocalStore()
 const localData = createLocalDataApi(localStore)
 const { db, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, query, where, onSnapshot, runTransaction, writeBatch, serverTimestamp, Timestamp, increment } = localData
 const LIBRIS_ADMIN_EMAIL = 'admin@crede17.ce.gov.br'
-const defaultEmailJs = {
-  serviceId: 'service_Libris',
-  studentTemplateId: 'template_LibrisA',
-  coordinationTemplateId: 'template_LibrisC',
-  publicKey: '3NnWny8jJqnZwiFWU'
-}
 
 const config = {
   organizationName: 'Libris',
@@ -32,7 +26,7 @@ const config = {
   maxBooksStudent: 2,
   maxBooksTeacher: 35,
   teacherLoanDays: 21,
-  emailjs: { ...defaultEmailJs }
+  smtp: { host: '', port: 587, username: '' }
 }
 
 const defaultCategories = []
@@ -265,12 +259,7 @@ function renderDashboard() {
         const targetTab = card.dataset.targetTab
         if (!targetTab) return
 
-        $$('.tab-btn').forEach((button) => {
-          button.classList.toggle('is-active', button.dataset.tab === targetTab)
-        })
-        $$('.tab-panel').forEach((panel) => {
-          panel.classList.toggle('is-active', panel.dataset.panel === targetTab)
-        })
+        setAdminTab(targetTab)
 
         if (targetTab === 'checkout') {
           const filterSelect = $('#loanFilterSelect')
@@ -689,99 +678,115 @@ async function openWhatsAppMessage(reader, message) {
   }
 }
 
-async function sendEmailNotification(reader, message, loan, recipient = reader, templateId = config.emailjs.studentTemplateId) {
-  const email = String(recipient?.email || '').trim()
+const EMAIL_AUDIT_LIMIT = 100
+
+async function logSentEmail(recipient, subject) {
+  const sentAt = new Date()
+  await localStore.put('email_logs', {
+    id: `${sentAt.getTime()}-${globalThis.crypto?.randomUUID?.() || Math.random().toString(16).slice(2)}`,
+    schoolId: config.currentSchoolId,
+    recipient,
+    subject,
+    sentAt: sentAt.toISOString(),
+    status: 'sent'
+  })
+
+  const schoolLogs = (await localStore.list('email_logs'))
+    .filter((record) => record.schoolId === config.currentSchoolId)
+    .sort((left, right) => new Date(right.sentAt).getTime() - new Date(left.sentAt).getTime())
+  await Promise.all(schoolLogs.slice(EMAIL_AUDIT_LIMIT).map((record) => localStore.remove('email_logs', record.id)))
+}
+
+async function sendEmailNotification(recipient, subject, message) {
+  const email = String(recipient || '').trim()
+  const smtp = config.smtp || {}
   if (!email) {
     toast('Endereço de e-mail não informado.', 'error')
-    return false
+    return { sent: false, audited: false }
   }
-
-  const emailjsReady = typeof window !== 'undefined' && !!window.emailjs
-  const serviceId = config.emailjs.serviceId
-  const publicKey = config.emailjs.publicKey
-  const dueDate = loan ? formatDate(loan.dueAt) : '—'
-
-  let diasAtraso = 0
-  if (loan && loan.dueAt) {
-    const due = date(loan.dueAt)
-    const today = new Date()
-    if (due < today) {
-      const diffTime = Math.abs(today - due)
-      diasAtraso = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-    }
+  if (!isTauri()) {
+    toast('O envio SMTP está disponível apenas no aplicativo desktop Libris.', 'error')
+    return { sent: false, audited: false }
   }
-
-  if (!emailjsReady || !serviceId || !templateId || !publicKey) {
-    toast('Serviço do EmailJS não está configurado corretamente.', 'error')
-    return false
+  if (!smtp.host || !smtp.username || ![465, 587].includes(Number(smtp.port))) {
+    toast('Configure host, porta e usuário SMTP na administração CREDE.', 'error')
+    return { sent: false, audited: false }
   }
 
   try {
-    window.emailjs.init({ publicKey })
-    await window.emailjs.send(serviceId, templateId, {
-      to_email: email,
-      to_name: recipient?.name || reader?.name || 'Leitor',
-      subject: 'Aviso da Biblioteca',
-      message: message,
-      school_name: config.schoolName,
-      escola: config.schoolName,
-      organization: config.organizationName,
-      name: reader?.name || 'Leitor',
-      livro: loan?.bookTitle || '',
-      loan_days: Number(loan?.days || 0),
-      data_vencimento: dueDate,
-      date: dueDate,
-      dias_atraso: diasAtraso
+    await invoke('send_email', {
+      schoolId: config.currentSchoolId,
+      smtpHost: smtp.host,
+      smtpPort: Number(smtp.port),
+      smtpUsername: smtp.username,
+      recipient: email,
+      subject,
+      body: message
     })
-    return true
-  } catch (error) {
-    console.error('Falha no EmailJS:', error)
-    toast('Erro ao enviar e-mail..', 'error')
-    return false
+  } catch (err) {
+    console.error('Falha no envio SMTP:', err)
+    toast(typeof err === 'string' ? err : 'Não foi possível enviar o e-mail. Verifique a configuração SMTP e a conexão.', 'error')
+    return { sent: false, audited: false }
+  }
+
+  try {
+    await logSentEmail(email, subject)
+    return { sent: true, audited: true }
+  } catch (err) {
+    console.error('E-mail enviado, mas a auditoria local falhou:', err)
+    return { sent: true, audited: false }
   }
 }
 
-async function sendEmailWithinMonthlyLimit(reader, message, loan, recipient, templateId) {
-  const month = new Date().toISOString().slice(0, 7)
-  const usageRef = doc(db, 'email_usage', `${config.currentSchoolId}_${month}`)
+async function sendEmailFromButton(button, recipient, subject, message) {
+  loading(button, true, 'Enviando…')
   try {
-    await runTransaction(db, async (transaction) => {
-      const snapshot = await transaction.get(usageRef)
-      const sentCount = Number(snapshot.exists() ? snapshot.data().sentCount || 0 : 0)
-      if (sentCount >= 10) throw new Error('A escola já usou o limite de 10 emails deste mês.')
-      transaction.set(usageRef, {
-        id: `${config.currentSchoolId}_${month}`,
-        schoolId: config.currentSchoolId,
-        month,
-        sentCount: sentCount + 1,
-        updatedAt: new Date()
-      }, { merge: true })
-    })
-  } catch (err) {
-    if (err?.message?.includes('limite de 10 emails')) {
-      toast(err.message, 'error')
-      return false
-    }
-    error(err, 'Não foi possível reservar o envio dentro do limite mensal da escola.')
-    return false
+    return await sendEmailNotification(recipient, subject, message)
+  } finally {
+    loading(button, false)
+  }
+}
+
+async function updateEmailCredentialStatus(elementId, schoolId = config.currentSchoolId) {
+  const status = $(`#${elementId}`)
+  if (!status) return
+  if (!isTauri()) {
+    status.textContent = 'Configure e envie e-mails pelo aplicativo desktop Libris.'
+    return
+  }
+  if (elementId === 'notificationEmailStatus' && (!config.smtp?.host || !config.smtp?.username)) {
+    status.textContent = 'Servidor SMTP não configurado. Solicite a configuração à administração CREDE.'
+    return
+  }
+  if (!schoolId) {
+    status.textContent = 'Salve o identificador da escola para consultar o cofre seguro.'
+    return
   }
 
-  const sent = await sendEmailNotification(reader, message, loan, recipient, templateId)
-  if (sent) return true
+  try {
+    const saved = await invoke('has_smtp_password', { schoolId })
+    status.textContent = saved
+      ? 'Senha de app guardada no cofre seguro do sistema.'
+      : 'Nenhuma senha SMTP salva no cofre seguro.'
+  } catch (err) {
+    console.error('Falha ao consultar a senha SMTP:', err)
+    status.textContent = 'Não foi possível consultar o cofre seguro do sistema.'
+  }
+}
+
+async function removeSmtpPassword() {
+  const schoolId = $('#librisSchoolIdInput')?.value.trim().toLowerCase()
+  if (!schoolId) return toast('Informe o identificador da escola antes de remover a senha.', 'error')
+  if (!isTauri()) return toast('O cofre de credenciais só está disponível no aplicativo desktop Libris.', 'error')
+  if (!confirm('Remover a senha SMTP salva no cofre seguro deste computador?')) return
 
   try {
-    await runTransaction(db, async (transaction) => {
-      const snapshot = await transaction.get(usageRef)
-      if (snapshot.exists()) transaction.set(usageRef, {
-        ...snapshot.data(),
-        sentCount: Math.max(0, Number(snapshot.data().sentCount || 1) - 1),
-        updatedAt: new Date()
-      })
-    })
+    await invoke('delete_smtp_password', { schoolId })
+    await updateEmailCredentialStatus('librisSmtpCredentialStatus', schoolId)
+    toast('Senha SMTP removida do cofre seguro.')
   } catch (err) {
-    error(err, 'O envio falhou e não foi possível devolver a cota mensal. Verifique o contador antes de tentar novamente.')
+    error(err, 'Não foi possível remover a senha SMTP do cofre seguro.')
   }
-  return false
 }
 
 async function triggerNotification(type) {
@@ -808,12 +813,10 @@ async function triggerNotification(type) {
     }
 
     const coordinationMessage = `Olá, coordenação. O empréstimo do livro "${loan.bookTitle}" para o(a) leitor(a) ${loan.readerName} está em atraso desde ${formatDate(loan.dueAt)}.`
-    const templateId = config.emailjs.coordinationTemplateId || config.emailjs.studentTemplateId
+    const result = await sendEmailFromButton($('#sendCoordinationBtn'), coordination.email, `Empréstimo em atraso - ${config.schoolName}`, coordinationMessage)
 
-    const sent = await sendEmailWithinMonthlyLimit(reader, coordinationMessage, loan, coordination, templateId)
-
-    if (!sent) return
-    toast('Aviso enviado à coordenação com sucesso!')
+    if (!result.sent) return
+    toast(result.audited ? 'Aviso enviado à coordenação com sucesso!' : 'Aviso enviado, mas o registro local de auditoria falhou.')
     modal('notificationModal', false)
     return
   }
@@ -831,10 +834,10 @@ async function triggerNotification(type) {
     return toast(`O leitor ${reader.name} não possui e-mail cadastrado na aba Leitores.`, 'error')
   }
 
-  const sent = await sendEmailWithinMonthlyLimit(reader, message, loan, reader, config.emailjs.studentTemplateId)
+  const result = await sendEmailFromButton($('#sendEmailBtn'), reader.email, `Aviso da biblioteca - ${config.schoolName}`, message)
 
-  if (!sent) return
-  toast('E-mail enviado ao leitor com sucesso!')
+  if (!result.sent) return
+  toast(result.audited ? 'E-mail enviado ao leitor com sucesso!' : 'E-mail enviado, mas o registro local de auditoria falhou.')
   modal('notificationModal', false)
 }
 
@@ -890,7 +893,7 @@ function recordsToExportRows(records = [], excludedFields = []) {
 async function schoolBackupTables() {
   if (!state.profile || state.profile.role !== 'admin' || !config.currentSchoolId) throw new Error('Acesse com um administrador vinculado a uma escola.')
 
-  const collectionNames = ['reservations', 'counters', 'audit_logs', 'email_usage']
+  const collectionNames = ['reservations', 'counters', 'audit_logs', 'email_logs']
   const [schoolSnapshot, ...snapshots] = await Promise.all([
     getDoc(doc(db, 'schools', config.currentSchoolId)),
     ...collectionNames.map((name) => getDocs(query(collection(db, name), where('schoolId', '==', config.currentSchoolId))))
@@ -909,7 +912,7 @@ async function schoolBackupTables() {
     ['Reservas', recordsToExportRows(collectionRecords.reservations)],
     ['Contadores', recordsToExportRows(collectionRecords.counters)],
     ['Auditoria', recordsToExportRows(collectionRecords.audit_logs)],
-    ['Uso de emails', recordsToExportRows(collectionRecords.email_usage)],
+    ['E-mails enviados', recordsToExportRows(collectionRecords.email_logs)],
     ['Escola', recordsToExportRows([{ id: config.currentSchoolId, ...schoolData, schoolId: config.currentSchoolId }])]
   ]
 }
@@ -1006,14 +1009,14 @@ async function createCsvBackupArchive() {
     Reservas: 'reservations',
     Contadores: 'counters',
     Auditoria: 'audit_logs',
-    'Uso de emails': 'email_usage',
+    'E-mails enviados': 'email_logs',
     Escola: 'schools'
   }
   const tables = await schoolBackupTables()
   const zip = new JSZip()
   tables.forEach(([name, rows]) => {
     const collectionName = collectionsByTable[name]
-    const filename = Object.entries(backupCollectionFiles).find(([, value]) => value === collectionName)?.[0]
+    const filename = Object.entries({ ...backupCollectionFiles, ...optionalBackupCollectionFiles }).find(([, value]) => value === collectionName)?.[0]
     if (!filename) throw new Error(`Não há arquivo CSV definido para ${name}.`)
     zip.file(filename, `\ufeff${csvFromRows(rows)}`)
   })
@@ -1030,7 +1033,7 @@ async function restoreCsvBackup(file) {
   const missingFiles = Object.keys(backupCollectionFiles).filter((filename) => !zip.file(filename))
   if (missingFiles.length) throw new Error(`Backup incompleto. Arquivos ausentes: ${missingFiles.join(', ')}.`)
   const collections = {}
-  for (const [filename, collectionName] of Object.entries(backupCollectionFiles)) {
+  for (const [filename, collectionName] of Object.entries({ ...backupCollectionFiles, ...optionalBackupCollectionFiles })) {
     const entry = zip.file(filename)
     if (!entry) continue
     const workbook = XLSX.read(await entry.async('arraybuffer'), { type: 'array', raw: false })
@@ -1410,6 +1413,9 @@ function resetAdminState() {
     context.fillStyle = '#1e5b3d'
     context.font = '700 18px Arial, sans-serif'
     context.fillText(String(book.categoryName || label(book.categoryId) || '').toLocaleUpperCase('pt-BR').slice(0, 42), 58, 418)
+    context.fillStyle = '#4f6256'
+    context.font = '600 17px Arial, sans-serif'
+    context.fillText(`TOMB.: ${String(book.tombamento || '—').toLocaleUpperCase('pt-BR').slice(0, 32)}`, 58, 455)
     context.fillStyle = '#718078'
     context.font = '600 15px Arial, sans-serif'
     context.fillText('CÓDIGO DO ACERVO', 58, 490)
@@ -1778,14 +1784,7 @@ async function notify(id) {
   const modalEl = $('#notificationModal')
   if (modalEl) modalEl.dataset.loanId = String(id)
   modal('notificationModal', true)
-  const month = new Date().toISOString().slice(0, 7)
-  try {
-    const usage = await getDoc(doc(db, 'email_usage', `${config.currentSchoolId}_${month}`))
-    const sentCount = Number(usage.exists() ? usage.data().sentCount || 0 : 0)
-    if ($('#monthlyEmailStatus')) $('#monthlyEmailStatus').textContent = `Cota mensal da escola: ${sentCount}/10 emails usados; ${Math.max(0, 10 - sentCount)} restantes.`
-  } catch (err) {
-    error(err, 'Não foi possível consultar a cota de emails da escola.')
-  }
+  await updateEmailCredentialStatus('notificationEmailStatus')
 }
 
 let qrScannerStream = null
@@ -1951,16 +1950,30 @@ function focusBookCodeInput() {
   requestAnimationFrame(() => $('#bookCodeInput')?.focus())
 }
 
+function setAdminTab(tabName) {
+  $$('.tab-btn').forEach((button) => {
+    button.classList.toggle('is-active', button.dataset.tab === tabName)
+  })
+  $$('.tab-panel').forEach((panel) => {
+    panel.classList.toggle('is-active', panel.dataset.panel === tabName)
+  })
+
+  const isRootTab = tabName === 'checkout'
+  $('#adminView')?.classList.toggle('is-subview', !isRootTab)
+  const backButton = $('#backToLoansBtn')
+  if (backButton) backButton.hidden = isRootTab
+  if (isRootTab) focusBookCodeInput()
+}
+
 /* -------------------------
    Form wiring and setup
    ------------------------- */
 function setup() {
   // Tabs
   $$('.tab-btn').forEach((b) => b.onclick = () => {
-    $$('.tab-btn').forEach((tb) => tb.classList.toggle('is-active', tb === b))
-    $$('.tab-panel').forEach((p) => p.classList.toggle('is-active', p.dataset.panel === b.dataset.tab))
-    if (b.dataset.tab === 'checkout') focusBookCodeInput()
+    setAdminTab(b.dataset.tab)
   })
+  if ($('#backToLoansBtn')) $('#backToLoansBtn').onclick = () => setAdminTab('checkout')
 
   if ($('#acervoSearchInput')) $('#acervoSearchInput').oninput = (x) => { state.acervoQuery = x.target.value; renderBooks() }
   if ($('#readerSearchInput')) $('#readerSearchInput').oninput = (x) => { state.readerQuery = x.target.value; renderReaders() }
@@ -1994,6 +2007,7 @@ function setup() {
   if ($('#categoryForm')) $('#categoryForm').onsubmit = addCategory
   if ($('#readerForm')) $('#readerForm').onsubmit = addReader
   if ($('#librisConfigForm')) $('#librisConfigForm').onsubmit = saveLibrisConfiguration
+  if ($('#removeSmtpPasswordBtn')) $('#removeSmtpPasswordBtn').onclick = removeSmtpPassword
   if ($('#loginForm')) $('#loginForm').onsubmit = handleLocalLogin
   if ($('#credeLoginForm')) $('#credeLoginForm').onsubmit = handleCredeLogin
   if ($('#toggleCredePasswordBtn')) {
@@ -2027,7 +2041,12 @@ function setup() {
 
   if ($('#openBookModalBtn')) $('#openBookModalBtn').onclick = () => { resetBookForm(); modal('bookFormModal', true) }
   if ($('#openReaderModalBtn')) $('#openReaderModalBtn').onclick = () => { resetReaderForm(); modal('readerFormModal', true) }
-  if ($('#openCategoryModalBtn')) $('#openCategoryModalBtn').onclick = () => { if ($('#categoryForm')) $('#categoryForm').reset(); modal('categoryModal', true) }
+  const openCategoryModal = () => {
+    if ($('#categoryForm')) $('#categoryForm').reset()
+    modal('categoryModal', true)
+  }
+  if ($('#openCategoryModalBtn')) $('#openCategoryModalBtn').onclick = openCategoryModal
+  if ($('#openCategoryFromBookBtn')) $('#openCategoryFromBookBtn').onclick = openCategoryModal
   if ($('#openBookLabelsBtn')) $('#openBookLabelsBtn').onclick = () => {
     if ($('#labelBookSearchInput')) $('#labelBookSearchInput').value = ''
     renderLabelSelection()
@@ -2094,10 +2113,11 @@ function fillLibrisConfigurationForm(school = {}) {
   if ($('#librisSchoolIdInput')) $('#librisSchoolIdInput').value = school.id || ''
   if ($('#librisSchoolNameInput')) $('#librisSchoolNameInput').value = school.name || ''
   if ($('#librisCoordinationEmailInput')) $('#librisCoordinationEmailInput').value = school.coordinationEmail || ''
-  if ($('#librisEmailServiceInput')) $('#librisEmailServiceInput').value = school.emailjs?.serviceId || config.emailjs.serviceId
-  if ($('#librisStudentTemplateInput')) $('#librisStudentTemplateInput').value = school.emailjs?.studentTemplateId || config.emailjs.studentTemplateId
-  if ($('#librisCoordinationTemplateInput')) $('#librisCoordinationTemplateInput').value = school.emailjs?.coordinationTemplateId || config.emailjs.coordinationTemplateId
-  if ($('#librisEmailPublicKeyInput')) $('#librisEmailPublicKeyInput').value = school.emailjs?.publicKey || config.emailjs.publicKey
+  if ($('#librisSmtpHostInput')) $('#librisSmtpHostInput').value = school.smtp?.host || ''
+  if ($('#librisSmtpPortInput')) $('#librisSmtpPortInput').value = String(school.smtp?.port || 587)
+  if ($('#librisSmtpUsernameInput')) $('#librisSmtpUsernameInput').value = school.smtp?.username || ''
+  if ($('#librisSmtpPasswordInput')) $('#librisSmtpPasswordInput').value = ''
+  void updateEmailCredentialStatus('librisSmtpCredentialStatus', school.id)
   renderLocalAccountRows([])
 }
 
@@ -2173,6 +2193,17 @@ async function saveLibrisConfiguration(event) {
   const schoolId = $('#librisSchoolIdInput')?.value.trim().toLowerCase()
   const schoolName = $('#librisSchoolNameInput')?.value.trim()
   if (!schoolId || !/^[a-z0-9_-]+$/.test(schoolId) || !schoolName) return toast('Informe um identificador válido e o nome da escola.', 'error')
+  const smtpHost = $('#librisSmtpHostInput')?.value.trim() || ''
+  const smtpPort = Number($('#librisSmtpPortInput')?.value || 587)
+  const smtpUsername = $('#librisSmtpUsernameInput')?.value.trim() || ''
+  const smtpPassword = $('#librisSmtpPasswordInput')?.value || ''
+  const smtpIsConfigured = Boolean(smtpHost || smtpUsername || smtpPassword)
+  if (smtpIsConfigured && (!smtpHost || !smtpUsername || ![465, 587].includes(smtpPort))) {
+    return toast('Para configurar SMTP, informe host, usuário/e-mail e porta segura 465 ou 587.', 'error')
+  }
+  if (smtpPassword && !isTauri()) {
+    return toast('A senha SMTP só pode ser salva com segurança no aplicativo desktop Libris.', 'error')
+  }
   const accounts = $$('[data-local-account-row]').map((row) => ({
     id: row.dataset.userId || '',
     email: row.querySelector('input[type="email"]')?.value.trim().toLowerCase() || '',
@@ -2187,12 +2218,7 @@ async function saveLibrisConfiguration(event) {
     schoolId,
     name: schoolName,
     coordinationEmail: $('#librisCoordinationEmailInput')?.value.trim() || '',
-    emailjs: {
-      serviceId: $('#librisEmailServiceInput')?.value.trim() || config.emailjs.serviceId,
-      studentTemplateId: $('#librisStudentTemplateInput')?.value.trim() || config.emailjs.studentTemplateId,
-      coordinationTemplateId: $('#librisCoordinationTemplateInput')?.value.trim() || config.emailjs.coordinationTemplateId,
-      publicKey: $('#librisEmailPublicKeyInput')?.value.trim() || config.emailjs.publicKey
-    },
+    smtp: { host: smtpHost, port: smtpPort, username: smtpUsername },
     active: true,
     updatedAt: new Date()
   }
@@ -2202,6 +2228,9 @@ async function saveLibrisConfiguration(event) {
     if (existingSchools.length && !existingSchools.some((item) => item.id === schoolId)) {
       return toast('Este computador já está configurado para outra escola. Não altere o identificador por aqui.', 'error')
     }
+    const existingSchool = existingSchools.find((item) => item.id === schoolId) || {}
+    const existingSchoolSettings = { ...existingSchool }
+    delete existingSchoolSettings.emailjs
     const existingUsers = await localStore.list('users')
     const usersToSave = []
     for (const account of accounts) {
@@ -2224,15 +2253,23 @@ async function saveLibrisConfiguration(event) {
       })
     }
     const batch = writeBatch(db)
-    batch.set(doc(db, 'schools', schoolId), school, { merge: true })
+    batch.set(doc(db, 'schools', schoolId), { ...existingSchoolSettings, ...school })
     existingUsers.filter((user) => user.schoolId === schoolId && user.role === 'admin').forEach((user) => {
       batch.set(doc(db, 'users', user.id), { ...user, active: false, updatedAt: new Date() }, { merge: true })
     })
     usersToSave.forEach((user) => batch.set(doc(db, 'users', user.id), user, { merge: true }))
     await batch.commit()
+    if (smtpPassword) {
+      try {
+        await invoke('save_smtp_password', { schoolId, password: smtpPassword })
+      } catch (err) {
+        console.error('Configuração salva, mas a senha SMTP não foi salva:', err)
+        return error(err, 'Configuração salva, mas não foi possível guardar a senha no cofre seguro. A senha não foi gravada localmente.')
+      }
+    }
     config.currentSchoolId = schoolId
     config.schoolName = schoolName
-    config.emailjs = school.emailjs
+    config.smtp = school.smtp
     config.coordinationEmail = school.coordinationEmail
     if ($('#librisConfigForm')) $('#librisConfigForm').reset()
     resetAdminState()
@@ -2346,13 +2383,10 @@ async function loadSchoolData(schoolId = config.currentSchoolId) {
       config.maxBooksStudent = Number(data.maxBooksStudent ?? 2)
       config.maxBooksTeacher = Number(data.maxBooksTeacher ?? 35)
       config.teacherLoanDays = Number(data.teacherLoanDays ?? 21)
-      config.emailjs = {
-        ...defaultEmailJs,
-        ...(data.emailjs || {}),
-        serviceId: data.emailjs?.serviceId || defaultEmailJs.serviceId,
-        studentTemplateId: data.emailjs?.studentTemplateId || defaultEmailJs.studentTemplateId,
-        coordinationTemplateId: data.emailjs?.coordinationTemplateId || defaultEmailJs.coordinationTemplateId,
-        publicKey: data.emailjs?.publicKey || defaultEmailJs.publicKey
+      config.smtp = {
+        host: String(data.smtp?.host || ''),
+        port: Number(data.smtp?.port || 587),
+        username: String(data.smtp?.username || '')
       }
     } else {
       return false
