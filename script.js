@@ -31,24 +31,33 @@ const config = {
 }
 
 function getMaxLoanDaysForReader(reader) {
-  const configuredDays = isTeacherReader(reader) ? config.teacherLoanDays : config.studentLoanDays
-  const fallback = isTeacherReader(reader) ? 21 : 7
-  return Math.min(180, Math.max(1, Math.trunc(Number(configuredDays) || fallback)))
+  if (isTeacherReader(reader)) return Math.min(180, Math.max(1, Math.trunc(Number(config.teacherLoanDays) || 21)))
+  if (isStudentReader(reader)) return Math.min(180, Math.max(1, Math.trunc(Number(config.studentLoanDays) || 7)))
+  return null
 }
 
 function updateLoanDaysLimit(reader, resetToMaximum = false) {
   const input = $('#loanDays')
   if (!input) return
   const maximum = getMaxLoanDaysForReader(reader)
+  const help = $('#loanDaysHelp')
+  if (maximum === null) {
+    input.removeAttribute('max')
+    if (help) {
+      help.textContent = ''
+      help.hidden = true
+    }
+    if (resetToMaximum) input.value = String(config.studentLoanDays || 7)
+    return
+  }
+
   input.max = String(maximum)
   const currentDays = Number(input.value)
-  if (resetToMaximum || !Number.isInteger(currentDays) || currentDays < 1 || currentDays > maximum) {
-    input.value = String(maximum)
-  }
-  const help = $('#loanDaysHelp')
+  if (resetToMaximum || !Number.isInteger(currentDays) || currentDays < 1 || currentDays > maximum) input.value = String(maximum)
   if (help) {
     const profile = isTeacherReader(reader) ? 'professor' : 'aluno'
     help.textContent = `Prazo máximo para ${profile}: ${maximum} dias. Informe um valor entre 1 e ${maximum}.`
+    help.hidden = false
   }
 }
 
@@ -73,7 +82,7 @@ const state = {
 }
 
 let pendingCsvImport = null
-const selectedLabelBookIds = new Set()
+const selectedLabelQuantities = new Map()
 let schoolSetupRequired = false
 
 /* -------------------------
@@ -84,6 +93,35 @@ const $$ = (s) => (typeof document !== 'undefined' ? Array.from(document?.queryS
 const esc = (v = '') => String(v).replace(/[&<>'"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[c])
 const getCategoryOptions = () => (state.categories.length ? state.categories : defaultCategories)
 const label = (id) => getCategoryOptions().find((x) => x.id === id)?.name || categories.find((x) => x.id === id)?.name || 'Geral'
+function getThemePreference() {
+  try {
+    const preference = localStorage.getItem('libris-theme')
+    return ['light', 'dark'].includes(preference) ? preference : 'system'
+  } catch (err) {
+    console.warn('Não foi possível ler a preferência de aparência.', err)
+    return 'system'
+  }
+}
+
+function applyThemePreference(preference, persist = false) {
+  if (!['system', 'light', 'dark'].includes(preference)) {
+    throw new Error(`Preferência de aparência inválida: ${preference}`)
+  }
+  if (preference === 'system') document.documentElement.removeAttribute('data-theme')
+  else document.documentElement.dataset.theme = preference
+
+  if (persist) {
+    try {
+      if (preference === 'system') localStorage.removeItem('libris-theme')
+      else localStorage.setItem('libris-theme', preference)
+      toast('Aparência atualizada neste dispositivo.')
+    } catch (err) {
+      console.error('Não foi possível salvar a preferência de aparência.', err)
+      toast('A aparência mudou, mas não foi possível salvar a preferência neste dispositivo.', 'error')
+    }
+  }
+}
+
 function bookCategoryName(book = {}) {
   const options = getCategoryOptions()
   const prefix = String(book.code || '').match(/^([A-Z0-9]{1,4})-\d{4}$/i)?.[1]
@@ -232,6 +270,7 @@ function selectLoanReader(readerId) {
   input.value = `${reader.name || ''}${reader.matricula ? ` · ${reader.matricula}` : ''}`
   selectedId.value = reader.id
   updateLoanDaysLimit(reader)
+  updateLoanQuantityLimit(reader)
   if (suggestions) {
     suggestions.replaceChildren()
     suggestions.hidden = true
@@ -275,16 +314,74 @@ function isTeacherReader(reader) {
 
 function count(list, key) { const map = new Map(); list.forEach((x) => { const k = key(x); map.set(k, (map.get(k) || 0) + 1) }); return [...map].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value) }
 
+function loanQuantity(loan) {
+  const quantity = Number(loan?.quantity || 1)
+  return Number.isSafeInteger(quantity) && quantity > 0 ? quantity : 1
+}
+
+function countLoanCopies(loans, key) {
+  const map = new Map()
+  loans.forEach((loan) => {
+    const label = key(loan)
+    map.set(label, (map.get(label) || 0) + loanQuantity(loan))
+  })
+  return [...map].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value)
+}
+
+function activeLoanCopiesForReader(readerId) {
+  return state.loans
+    .filter((loan) => loan.readerId === readerId && loan.status === 'active')
+    .reduce((total, loan) => total + loanQuantity(loan), 0)
+}
+
+function updateLoanQuantityLimit(reader = null) {
+  const field = $('#loanQuantityField')
+  const input = $('#loanQuantity')
+  const help = $('#loanQuantityHelp')
+  const checkoutForm = field?.closest('.checkout-form')
+  if (!field || !input) return
+
+  if (!isTeacherReader(reader)) {
+    field.hidden = true
+    checkoutForm?.classList.remove('has-loan-quantity')
+    input.value = '1'
+    input.removeAttribute('max')
+    if (help) help.hidden = true
+    return
+  }
+
+  field.hidden = false
+  checkoutForm?.classList.add('has-loan-quantity')
+  const bookCode = $('#bookCodeInput')?.value.trim().toUpperCase()
+  const book = state.books.find((item) => item.code?.toUpperCase() === bookCode)
+  const remainingLimit = Math.max(0, getLoanLimitForReader(reader) - activeLoanCopiesForReader(reader.id))
+  const maximum = Math.min(book?.available ?? remainingLimit, remainingLimit)
+  input.max = String(maximum)
+  input.disabled = maximum < 1
+  input.value = String(Math.max(1, Math.min(Number(input.value) || 1, maximum || 1)))
+  if (help) {
+    help.textContent = maximum < 1
+      ? book && Number(book.available || 0) < 1
+        ? 'Este livro não tem exemplares disponíveis no momento.'
+        : 'O leitor já atingiu o limite de empréstimos configurado.'
+      : book
+        ? `Informe de 1 a ${maximum} exemplares, respeitando o estoque e o limite configurado.`
+        : `Limite restante: ${remainingLimit} exemplares. Informe o livro para conferir o estoque.`
+    help.hidden = false
+  }
+}
+
 function renderBars(target, data) { if (!target) return; if (!data.length) { target.innerHTML = '<p class="empty-state">Sem dados.</p>'; return }; const max = Math.max(...data.map((x) => x.value), 1); target.innerHTML = data.map((x) => `<div class="bar-row"><span>${esc(x.label)}</span><div class="bar-track"><div class="bar-fill" style="width:${x.value / max * 100}%"></div></div><strong>${x.value}</strong></div>`).join('') }
 
 function renderDashboard() {
   const active = state.loans.filter((l) => l.status === 'active')
-  const overdueCount = active.filter(overdue).length
+  const activeCount = active.reduce((total, loan) => total + loanQuantity(loan), 0)
+  const overdueCount = active.filter(overdue).reduce((total, loan) => total + loanQuantity(loan), 0)
 
   const values = [
     ['Total de Livros', state.books.reduce((n, b) => n + Number(b.total || 0), 0), '📚', 'acervo', ''],
-    ['Empréstimos Ativos', active.length, '📖', 'checkout', 'all'],
-    ['Livros em Atraso', overdueCount, '⚠️', 'checkout', 'overdue'],
+    ['Exemplares Emprestados', activeCount, '📖', 'checkout', 'all'],
+    ['Exemplares em Atraso', overdueCount, '⚠️', 'checkout', 'overdue'],
     ['Leitores Cadastrados', state.readers.length, '👥', 'leitores', '']
   ]
 
@@ -369,9 +466,9 @@ function renderDashboard() {
   const percent = total ? Math.round(free / total * 100) : 0
   if ($('#statusDonut')) $('#statusDonut').innerHTML = `<div class="donut" style="background:conic-gradient(var(--success) 0 ${percent}%,var(--warning) ${percent}% 100%)"><div class="donut-center">${percent}%</div></div>`
   if ($('#statusLegend')) $('#statusLegend').innerHTML = `<div class="legend-item"><span class="legend-dot success"></span>Disponíveis: ${free}</div><div class="legend-item"><span class="legend-dot warning"></span>Emprestados: ${Math.max(0, total - free)}</div>`
-  renderBars($('#courseChart'), count(active, (l) => l.readerCourse || 'Não informado').slice(0, 5))
-  const top = count(state.loans, (l) => l.readerName || 'Leitor').slice(0, 5)
-  if ($('#readerChart')) $('#readerChart').innerHTML = top.length ? top.map((x) => `<div class="list-item"><strong>${esc(x.label)}</strong><span>${x.value} empréstimos</span></div>`).join('') : '<p class="empty-state">Sem dados.</p>'
+  renderBars($('#courseChart'), countLoanCopies(active, (l) => l.readerCourse || 'Não informado').slice(0, 5))
+  const top = countLoanCopies(state.loans, (l) => l.readerName || 'Leitor').slice(0, 5)
+  if ($('#readerChart')) $('#readerChart').innerHTML = top.length ? top.map((x) => `<div class="list-item"><strong>${esc(x.label)}</strong><span>${x.value} exemplares</span></div>`).join('') : '<p class="empty-state">Sem dados.</p>'
 
   const currentYear = new Date().getFullYear()
   const monthCounts = Array.from({ length: 12 }, (_, index) => {
@@ -387,7 +484,7 @@ function renderDashboard() {
     const createdAt = date(loan.createdAt)
     if (!(createdAt instanceof Date) || Number.isNaN(createdAt.getTime())) return
     const month = monthCountByKey.get(`${createdAt.getFullYear()}-${createdAt.getMonth()}`)
-    if (month) month.value += 1
+    if (month)     month.value += loanQuantity(loan)
   })
   renderBars($('#monthlyLoanChart'), monthCounts.some((month) => month.value > 0) ? monthCounts : [])
 
@@ -430,7 +527,7 @@ function renderDashboard() {
 
   renderBars(
     $('#topBooksChart'),
-    count(state.loans, (loan) => loan.bookTitle || loan.bookCode || 'Livro sem título').slice(0, 5)
+    countLoanCopies(state.loans, (loan) => loan.bookTitle || loan.bookCode || 'Livro sem título').slice(0, 5)
   )
 
   const readersById = new Map(state.readers.map((reader) => [reader.id, reader]))
@@ -439,6 +536,309 @@ function renderDashboard() {
     return reader && isStudentReader(reader) ? 'Alunos' : 'Professores e outros'
   })
   renderBars($('#loansByReaderTypeChart'), activeLoansByReaderType)
+}
+
+function dashboardExportPeriod() {
+  const selected = $('#dashboardExportPeriod')?.value || '30'
+  const now = new Date()
+  const start = selected === 'all'
+    ? new Date(0)
+    : new Date(now.getTime() - Number(selected) * 86400000)
+  const loans = state.loans.filter((loan) => {
+    if (selected === 'all') return true
+    const createdAt = date(loan.createdAt)
+    return createdAt instanceof Date && !Number.isNaN(createdAt.getTime()) && createdAt >= start && createdAt <= now
+  })
+  const returns = state.loans.filter((loan) => {
+    const returnedAt = date(loan.returnedAt)
+    return returnedAt instanceof Date && !Number.isNaN(returnedAt.getTime()) &&
+      (selected === 'all' || (returnedAt >= start && returnedAt <= now))
+  })
+  return {
+    now,
+    start,
+    period: selected,
+    loans,
+    returns,
+    label: selected === 'all'
+      ? 'Todo o período'
+      : `${start.toLocaleDateString('pt-BR')} a ${now.toLocaleDateString('pt-BR')}`
+  }
+}
+
+function dashboardExportData() {
+  const period = dashboardExportPeriod()
+  const readerById = new Map(state.readers.map((reader) => [reader.id, reader]))
+  const groupLoans = (keyForLoan) => countLoanCopies(period.loans, keyForLoan).slice(0, 5)
+  const loanReaderType = (loan) => {
+    const reader = readerById.get(loan.readerId)
+    if (isStudentReader(reader)) return 'Alunos'
+    if (isTeacherReader(reader)) return 'Professores'
+    return 'Outros'
+  }
+  const genreData = count(state.books, (book) => bookCategoryName(book)).slice(0, 5)
+  const monthlyBuckets = Array.from({ length: 6 }, (_, index) => {
+    const start = new Date(period.now.getFullYear(), period.now.getMonth() - 5 + index, 1)
+    return {
+      label: start.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', ''),
+      value: 0
+    }
+  })
+  const monthlyByKey = new Map(monthlyBuckets.map((bucket, index) => {
+    const start = new Date(period.now.getFullYear(), period.now.getMonth() - 5 + index, 1)
+    return [`${start.getFullYear()}-${start.getMonth()}`, bucket]
+  }))
+  period.loans.forEach((loan) => {
+    const createdAt = date(loan.createdAt)
+    if (!(createdAt instanceof Date) || Number.isNaN(createdAt.getTime())) return
+    const bucket = monthlyByKey.get(`${createdAt.getFullYear()}-${createdAt.getMonth()}`)
+    if (bucket) bucket.value += loanQuantity(loan)
+  })
+  return {
+    ...period,
+    readerById,
+    charts: [
+      { title: 'Top 5 Gêneros', kind: 'bars', data: genreData },
+      { title: 'Status do Acervo', kind: 'donut', data: [
+        { label: 'Disponíveis', value: state.books.reduce((sum, book) => sum + Number(book.available || 0), 0) },
+        { label: 'Emprestados', value: Math.max(0, state.books.reduce((sum, book) => sum + Number(book.total || 0), 0) - state.books.reduce((sum, book) => sum + Number(book.available || 0), 0)) }
+      ] },
+      { title: 'Empréstimos por Curso/Turma', kind: 'bars', data: groupLoans((loan) => loan.readerCourse || 'Não informado') },
+      { title: 'Top Leitores', kind: 'bars', data: groupLoans((loan) => loan.readerName || 'Leitor') },
+      { title: 'Empréstimos por mês', kind: 'bars', data: monthlyBuckets.filter((bucket) => bucket.value > 0) },
+      { title: 'Perfil dos leitores', kind: 'donut', data: [
+        { label: 'Alunos', value: state.readers.filter(isStudentReader).length },
+        { label: 'Professores', value: state.readers.filter(isTeacherReader).length },
+        { label: 'Outros', value: state.readers.filter((reader) => !isStudentReader(reader) && !isTeacherReader(reader)).length }
+      ] },
+      { title: 'Livros mais emprestados', kind: 'bars', data: groupLoans((loan) => loan.bookTitle || loan.bookCode || 'Livro sem título') },
+      { title: 'Exemplares emprestados por perfil', kind: 'bars', data: groupLoans(loanReaderType) }
+    ]
+  }
+}
+
+function createDashboardExportCanvas(data) {
+  const canvas = document.createElement('canvas')
+  canvas.width = 1600
+  canvas.height = 2263
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('Não foi possível preparar a imagem dos gráficos.')
+  const dark = document.documentElement.dataset.theme === 'dark' ||
+    (!document.documentElement.dataset.theme && window.matchMedia('(prefers-color-scheme: dark)').matches)
+  const palette = dark
+    ? { page: '#10161e', panel: '#18212b', text: '#eef3f8', muted: '#b3bfca', line: '#364453', track: '#303d4c', colors: ['#4778f5', '#4fdb93', '#ffca6e', '#c09aff', '#ff8389'] }
+    : { page: '#f3f7f4', panel: '#ffffff', text: '#17251c', muted: '#4d5d52', line: '#c7d8cc', track: '#e8efea', colors: ['#2457d6', '#087a49', '#e99424', '#8b4bd8', '#c33d4b'] }
+  context.fillStyle = palette.page
+  context.fillRect(0, 0, canvas.width, canvas.height)
+  context.fillStyle = palette.text
+  context.font = '700 42px Arial'
+  context.fillText('Libris — Gráficos gerais', 64, 76)
+  context.fillStyle = palette.muted
+  context.font = '24px Arial'
+  context.fillText(`${config.schoolName || 'Biblioteca escolar'} · ${data.label}`, 64, 120)
+  const columns = 2
+  const margin = 64
+  const gapX = 28
+  const gapY = 24
+  const top = 158
+  const cardWidth = (canvas.width - margin * 2 - gapX) / columns
+  const cardHeight = (canvas.height - top - margin - gapY * 3) / 4
+  data.charts.forEach((chart, index) => {
+    const column = index % columns
+    const row = Math.floor(index / columns)
+    const x = margin + column * (cardWidth + gapX)
+    const y = top + row * (cardHeight + gapY)
+    context.fillStyle = palette.panel
+    context.strokeStyle = palette.line
+    context.lineWidth = 2
+    context.fillRect(x, y, cardWidth, cardHeight)
+    context.strokeRect(x, y, cardWidth, cardHeight)
+    context.fillStyle = palette.text
+    context.font = '700 24px Arial'
+    context.fillText(chart.title, x + 24, y + 44, cardWidth - 48)
+
+    if (chart.kind === 'donut') {
+      const total = chart.data.reduce((sum, item) => sum + item.value, 0)
+      const centerX = x + cardWidth / 2
+      const centerY = y + cardHeight * 0.53
+      const radius = Math.min(115, cardWidth * 0.22)
+      let angle = -Math.PI / 2
+      chart.data.forEach((item, itemIndex) => {
+        if (total <= 0 || !item.value) return
+        const nextAngle = angle + item.value / total * Math.PI * 2
+        context.beginPath()
+        context.moveTo(centerX, centerY)
+        context.arc(centerX, centerY, radius, angle, nextAngle)
+        context.closePath()
+        context.fillStyle = palette.colors[itemIndex % palette.colors.length]
+        context.fill()
+        angle = nextAngle
+      })
+      context.beginPath()
+      context.arc(centerX, centerY, radius * 0.58, 0, Math.PI * 2)
+      context.fillStyle = palette.panel
+      context.fill()
+      context.fillStyle = palette.text
+      context.textAlign = 'center'
+      context.font = '700 28px Arial'
+      context.fillText(String(total), centerX, centerY + 10)
+      context.textAlign = 'start'
+      chart.data.forEach((item, itemIndex) => {
+        const legendY = y + cardHeight - 70 + itemIndex * 28
+        context.fillStyle = palette.colors[itemIndex % palette.colors.length]
+        context.fillRect(x + 35, legendY - 14, 18, 18)
+        context.fillStyle = palette.muted
+        context.font = '18px Arial'
+        context.fillText(`${item.label}: ${item.value}`, x + 64, legendY, cardWidth - 90)
+      })
+      if (!total) {
+        context.fillStyle = palette.muted
+        context.textAlign = 'center'
+        context.font = '20px Arial'
+        context.fillText('Sem dados.', centerX, centerY + radius + 42)
+        context.textAlign = 'start'
+      }
+      return
+    }
+
+    if (!chart.data.length) {
+      context.fillStyle = palette.muted
+      context.font = '20px Arial'
+      context.textAlign = 'center'
+      context.fillText('Sem dados no período.', x + cardWidth / 2, y + cardHeight / 2)
+      context.textAlign = 'start'
+      return
+    }
+    const items = chart.data.slice(0, 6)
+    const max = Math.max(...items.map((item) => item.value), 1)
+    const rowHeight = Math.min(54, (cardHeight - 90) / items.length)
+    items.forEach((item, itemIndex) => {
+      const rowY = y + 86 + itemIndex * rowHeight
+      const labelWidth = cardWidth * 0.34
+      const trackX = x + labelWidth + 36
+      const trackWidth = cardWidth - labelWidth - 105
+      context.fillStyle = palette.text
+      context.font = '18px Arial'
+      context.fillText(item.label, x + 24, rowY + 20, labelWidth - 40)
+      context.fillStyle = palette.track
+      context.fillRect(trackX, rowY, trackWidth, 18)
+      context.fillStyle = palette.colors[0]
+      context.fillRect(trackX, rowY, Math.max(item.value ? 4 : 0, trackWidth * item.value / max), 18)
+      context.fillStyle = palette.text
+      context.textAlign = 'right'
+      context.font = '700 18px Arial'
+      context.fillText(String(item.value), x + cardWidth - 24, rowY + 18)
+      context.textAlign = 'start'
+    })
+  })
+  return canvas
+}
+
+function dashboardExportFilename(suffix, extension) {
+  const schoolId = String(config.currentSchoolId || 'escola').replace(/[^a-z0-9_-]/gi, '_')
+  return `libris-${suffix}-${schoolId}-${new Date().toISOString().slice(0, 10)}.${extension}`
+}
+
+async function downloadDashboardChartsJpg() {
+  const button = $('#downloadDashboardJpgBtn')
+  const filename = dashboardExportFilename('graficos', 'jpg')
+  loading(button, true, 'Preparando JPG…')
+  try {
+    const target = await chooseSaveTarget(filename, 'Imagem JPG', ['jpg'])
+    if (!target) return
+    const canvas = createDashboardExportCanvas(dashboardExportData())
+    await saveBlobToTarget(await canvasToBlob(canvas), target)
+  } catch (err) {
+    console.error('Falha ao exportar gráficos JPG:', err)
+    error(err, 'Não foi possível baixar os gráficos em JPG.')
+  } finally {
+    loading(button, false)
+  }
+}
+
+async function downloadDashboardChartsPdf() {
+  const button = $('#downloadDashboardPdfBtn')
+  const filename = dashboardExportFilename('graficos', 'pdf')
+  loading(button, true, 'Preparando PDF…')
+  try {
+    const target = await chooseSaveTarget(filename, 'Documento PDF', ['pdf'])
+    if (!target) return
+    const { jsPDF } = await import('https://cdn.jsdelivr.net/npm/jspdf@2.5.2/+esm')
+    const canvas = createDashboardExportCanvas(dashboardExportData())
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true })
+    pdf.addImage(canvas.toDataURL('image/jpeg', 0.94), 'JPEG', 0, 0, 210, 297)
+    pdf.setProperties({ title: `Gráficos gerais - ${config.schoolName}`, author: 'Libris' })
+    await saveBlobToTarget(pdf.output('blob'), target)
+  } catch (err) {
+    console.error('Falha ao exportar gráficos PDF:', err)
+    error(err, 'Não foi possível baixar os gráficos em PDF.')
+  } finally {
+    loading(button, false)
+  }
+}
+
+async function downloadDashboardReport() {
+  const button = $('#downloadDashboardReportBtn')
+  const filename = dashboardExportFilename('relatorio', 'pdf')
+  loading(button, true, 'Preparando relatório…')
+  try {
+    const target = await chooseSaveTarget(filename, 'Documento PDF', ['pdf'])
+    if (!target) return
+    const { jsPDF } = await import('https://cdn.jsdelivr.net/npm/jspdf@2.5.2/+esm')
+    const data = dashboardExportData()
+    const active = data.loans.filter((loan) => loan.status === 'active')
+    const overdueCount = active.filter(overdue).reduce((total, loan) => total + loanQuantity(loan), 0)
+    const profileCounts = countLoanCopies(data.loans, (loan) => {
+      const reader = data.readerById.get(loan.readerId)
+      if (isStudentReader(reader)) return 'Alunos'
+      if (isTeacherReader(reader)) return 'Professores'
+      return 'Outros'
+    })
+    const topBooks = countLoanCopies(data.loans, (loan) => loan.bookTitle || loan.bookCode || 'Livro sem título').slice(0, 5)
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true })
+    const left = 18
+    const width = 174
+    let y = 22
+    const addLine = (text, options = {}) => {
+      pdf.setFont('helvetica', options.bold ? 'bold' : 'normal')
+      pdf.setFontSize(options.size || 11)
+      const lines = pdf.splitTextToSize(String(text), width)
+      const height = lines.length * (options.lineHeight || 6)
+      if (y + height > 280) {
+        pdf.addPage()
+        y = 20
+      }
+      pdf.text(lines, left, y)
+      y += height + (options.gap ?? 2)
+    }
+    addLine('Libris — Relatório da biblioteca', { bold: true, size: 18, lineHeight: 9, gap: 2 })
+    addLine(config.schoolName || 'Biblioteca escolar', { bold: true, size: 13, lineHeight: 7 })
+    addLine(`Período: ${data.label}`)
+    addLine(`Gerado em: ${new Date().toLocaleString('pt-BR')}`)
+    y += 3
+    addLine('Resumo do período', { bold: true, size: 14, lineHeight: 7 })
+    addLine(`Exemplares emprestados no período: ${data.loans.reduce((total, loan) => total + loanQuantity(loan), 0)}`)
+    addLine(`Exemplares devolvidos no período: ${data.returns.reduce((total, loan) => total + loanQuantity(loan), 0)}`)
+    addLine(`Exemplares ativos referentes ao período: ${active.reduce((total, loan) => total + loanQuantity(loan), 0)}`)
+    addLine(`Exemplares em atraso entre os ativos: ${overdueCount}`)
+    addLine(`Leitores cadastrados atualmente: ${state.readers.length}`)
+    addLine(`Exemplares no acervo atualmente: ${state.books.reduce((sum, book) => sum + Number(book.total || 0), 0)}`)
+    y += 3
+    addLine('Exemplares emprestados por perfil', { bold: true, size: 14, lineHeight: 7 })
+    if (profileCounts.length) profileCounts.forEach((item) => addLine(`${item.label}: ${item.value}`))
+    else addLine('Sem empréstimos registrados no período.')
+    y += 3
+    addLine('Livros mais emprestados no período', { bold: true, size: 14, lineHeight: 7 })
+    if (topBooks.length) topBooks.forEach((item, index) => addLine(`${index + 1}. ${item.label}: ${item.value}`))
+    else addLine('Sem empréstimos registrados no período.')
+    pdf.setProperties({ title: `Relatório Libris - ${config.schoolName}`, author: 'Libris' })
+    await saveBlobToTarget(pdf.output('blob'), target)
+  } catch (err) {
+    console.error('Falha ao gerar relatório:', err)
+    error(err, 'Não foi possível gerar o relatório PDF.')
+  } finally {
+    loading(button, false)
+  }
 }
 
 /* -------------------------
@@ -457,8 +857,7 @@ function getLastBookSequence(prefix) {
 }
 
 function getLoanLimitForReader(reader = {}) {
-  const role = String(reader.role || reader.type || 'student').toLowerCase()
-  return role === 'teacher' ? Number(config.maxBooksTeacher || 35) : Number(config.maxBooksStudent || 2)
+  return isTeacherReader(reader) ? Number(config.maxBooksTeacher || 35) : Number(config.maxBooksStudent || 2)
 }
 
 async function logAudit(action, details = {}, actorUid = null) {
@@ -645,11 +1044,16 @@ async function registerLoan() {
     return toast(!book ? 'Livro não encontrado.' : 'Leitor não encontrado.', 'error')
   }
 
-  const activeLoansForReader = state.loans.filter((loan) => loan.readerId === reader.id && loan.status === 'active')
+  const quantity = isTeacherReader(reader) ? Number($('#loanQuantity')?.value || 1) : 1
+  const activeLoansForReader = activeLoanCopiesForReader(reader.id)
   const loanLimit = getLoanLimitForReader(reader)
 
-  if (activeLoansForReader.length >= loanLimit) {
-    return toast(`Limite excedido para ${reader.role || reader.type || 'este perfil'}: ${loanLimit} empréstimos ativos (Já possui ${activeLoansForReader.length}).`, 'error')
+  if (!Number.isSafeInteger(quantity) || quantity < 1) {
+    return toast('Informe uma quantidade inteira de exemplares maior que zero.', 'error')
+  }
+
+  if (activeLoansForReader + quantity > loanLimit) {
+    return toast(`O limite para ${reader.role || reader.type || 'este perfil'} é de ${loanLimit} exemplares ativos. Já possui ${activeLoansForReader}; pode emprestar mais ${Math.max(0, loanLimit - activeLoansForReader)}.`, 'error')
   }
 
   const duplicateLoansSnap = await getDocs(query(
@@ -665,9 +1069,12 @@ async function registerLoan() {
   }
 
   const maxLoanDays = getMaxLoanDaysForReader(reader)
-  if (!Number.isInteger(days) || days < 1 || days > maxLoanDays) {
+  if (!Number.isSafeInteger(days) || days < 1 || (maxLoanDays !== null && days > maxLoanDays)) {
     updateLoanDaysLimit(reader)
-    return toast(`O prazo deve ser entre 1 e ${maxLoanDays} dias para este perfil.`, 'error')
+    const message = maxLoanDays === null
+      ? 'Informe um prazo em dias como número inteiro maior que zero.'
+      : `O prazo deve ser entre 1 e ${maxLoanDays} dias para este perfil.`
+    return toast(message, 'error')
   }
 
   loading(button, true, 'Registrando…')
@@ -677,18 +1084,19 @@ async function registerLoan() {
       const bookRef = doc(db, 'books', book.id)
       const bookSnap = await tx.get(bookRef)
 
-      if (!bookSnap.exists() || Number(bookSnap.data().available || 0) < 1) {
+      const availableCopies = Number(bookSnap.data()?.available || 0)
+      if (!bookSnap.exists() || availableCopies < quantity) {
         throw new Error('indisponível')
       }
 
-      const availableCopies = Number(bookSnap.data().available || 0)
       const due = new Date()
       const effectiveDays = days
       due.setDate(due.getDate() + effectiveDays)
+      if (Number.isNaN(due.getTime())) throw new Error('prazo inválido')
 
       tx.update(bookRef, {
-        available: increment(-1),
-        status: availableCopies - 1 > 0 ? 'disponivel' : 'emprestado',
+        available: increment(-quantity),
+        status: availableCopies - quantity > 0 ? 'disponivel' : 'emprestado',
         schoolId: bookSnap.data().schoolId || config.currentSchoolId,
         updatedAt: serverTimestamp()
       })
@@ -702,6 +1110,7 @@ async function registerLoan() {
         readerName: reader.name,
         readerCourse: reader.course || 'Não se aplica',
         readerEmail: reader.email || '',
+        quantity,
         days: effectiveDays,
         dueAt: Timestamp.fromDate(due),
         status: 'active',
@@ -711,10 +1120,11 @@ async function registerLoan() {
       })
     })
 
-    await logAudit('loan_created', { bookId: book.id, readerId: reader.id, days }, state.user?.uid || null)
+    await logAudit('loan_created', { bookId: book.id, readerId: reader.id, quantity, days }, state.user?.uid || null)
     if ($('#bookCodeInput')) $('#bookCodeInput').value = ''
     if ($('#readerInput')) $('#readerInput').value = ''
     if ($('#loanReaderIdInput')) $('#loanReaderIdInput').value = ''
+    updateLoanQuantityLimit(null)
     updateLoanDaysLimit(null, true)
     if ($('#readerSuggestions')) $('#readerSuggestions').hidden = true
     if ($('#bookCodeInput')) $('#bookCodeInput').focus()
@@ -736,13 +1146,14 @@ async function returnLoan(id) {
       const loanRef = doc(db, 'loans', id)
       const loanSnap = await tx.get(loanRef)
       if (!loanSnap.exists() || loanSnap.data().status !== 'active') throw new Error('inválido')
+      const quantity = loanQuantity(loanSnap.data())
       const bookRef = doc(db, 'books', loanSnap.data().bookId)
       const bookSnap = await tx.get(bookRef)
 
       tx.update(loanRef, { status: 'returned', returnedAt: serverTimestamp(), updatedAt: serverTimestamp(), schoolId: loanSnap.data().schoolId || config.currentSchoolId })
 
       if (bookSnap.exists()) {
-        const free = Math.min(Number(bookSnap.data().available || 0) + 1, Number(bookSnap.data().total || 0))
+        const free = Math.min(Number(bookSnap.data().available || 0) + quantity, Number(bookSnap.data().total || 0))
         tx.update(bookRef, { available: free, status: free ? 'disponivel' : 'emprestado', updatedAt: serverTimestamp(), schoolId: bookSnap.data().schoolId || config.currentSchoolId })
       }
     })
@@ -760,13 +1171,16 @@ async function renewLoan(id) {
   const days = Number(select?.value || loan.days || 7)
   const reader = state.readers.find((item) => item.id === loan.readerId)
   const maximum = getMaxLoanDaysForReader(reader)
-  if (!Number.isInteger(days) || days < 1 || days > maximum) {
-    toast(`A renovação deve ser entre 1 e ${maximum} dias para este perfil.`, 'error')
+  if (!Number.isSafeInteger(days) || days < 1 || (maximum !== null && days > maximum)) {
+    toast(maximum === null
+      ? 'Informe um prazo em dias como número inteiro maior que zero.'
+      : `A renovação deve ser entre 1 e ${maximum} dias para este perfil.`, 'error')
     return
   }
   try {
     const due = date(loan.dueAt) ? new Date(date(loan.dueAt)) : new Date()
     due.setDate(due.getDate() + days)
+    if (Number.isNaN(due.getTime())) throw new Error('prazo inválido')
     await updateDoc(doc(db, 'loans', id), { days, dueAt: Timestamp.fromDate(due), notices: {}, schoolId: config.currentSchoolId, updatedAt: serverTimestamp() })
     await logAudit('loan_renewed', { loanId: id, days }, state.user?.uid || null)
     toast(`Renovação concluída por ${days} dias.`)
@@ -942,7 +1356,7 @@ async function triggerNotification(type) {
       email: coordEmail 
     }
 
-    const coordinationMessage = `Olá, coordenação. O empréstimo do livro "${loan.bookTitle}" para o(a) leitor(a) ${loan.readerName} está em atraso desde ${formatDate(loan.dueAt)}.`
+    const coordinationMessage = `Olá, coordenação. O empréstimo de ${loanQuantity(loan)} exemplar(es) do livro "${loan.bookTitle}" para o(a) leitor(a) ${loan.readerName} está em atraso desde ${formatDate(loan.dueAt)}.`
     const result = await sendEmailFromButton($('#sendCoordinationBtn'), coordination.email, `Empréstimo em atraso - ${config.schoolName}`, coordinationMessage)
 
     if (!result.sent) return
@@ -1065,33 +1479,88 @@ function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-async function saveExportBlob(blob, filename, filterName, extensions) {
-  if (!isTauri()) {
-    downloadBlob(blob, filename)
+function canvasToBlob(canvas, type = 'image/jpeg', quality = 0.94) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error('Não foi possível converter a imagem para download.'))
+        return
+      }
+      resolve(blob)
+    }, type, quality)
+  })
+}
+
+function fileMimeType(extension) {
+  return ({
+    jpg: 'image/jpeg',
+    pdf: 'application/pdf',
+    zip: 'application/zip'
+  })[extension] || 'application/octet-stream'
+}
+
+async function chooseSaveTarget(filename, filterName, extensions) {
+  if (isTauri()) {
+    const path = await save({
+      title: 'Salvar arquivo do Libris',
+      defaultPath: filename,
+      filters: [{ name: filterName, extensions }]
+    })
+    return path ? { kind: 'tauri', path } : null
+  }
+
+  if (typeof window.showSaveFilePicker === 'function') {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: filename,
+        types: [{
+          description: filterName,
+          accept: { [fileMimeType(extensions[0])]: extensions.map((extension) => `.${extension}`) }
+        }]
+      })
+      return { kind: 'web', handle }
+    } catch (err) {
+      if (err.name === 'AbortError') return null
+      throw err
+    }
+  }
+
+  return { kind: 'browser', filename }
+}
+
+async function saveBlobToTarget(blob, target) {
+  if (!target) return false
+
+  if (target.kind === 'tauri') {
+    await writeFile(target.path, new Uint8Array(await blob.arrayBuffer()))
+    toast(`Arquivo salvo em: ${target.path}`)
     return true
   }
 
-  const path = await save({
-    title: 'Salvar arquivo do Libris',
-    defaultPath: filename,
-    filters: [{ name: filterName, extensions }]
-  })
-  if (!path) return false
+  if (target.kind === 'web') {
+    const writable = await target.handle.createWritable()
+    await writable.write(blob)
+    await writable.close()
+    toast(`Arquivo salvo: ${target.handle.name}`)
+    return true
+  }
 
-  await writeFile(path, new Uint8Array(await blob.arrayBuffer()))
+  downloadBlob(blob, target.filename)
+  toast(`Download de ${target.filename} iniciado. A localização depende das configurações de downloads do navegador.`)
   return true
 }
 
 async function exportCsv() {
   const button = $('#exportCsvOption')
+  const filename = `${backupFileBaseName()}.zip`
   loading(button, true, 'Preparando backup…')
-  toast('Gerando arquivo de backup...')
   try {
+    const target = await chooseSaveTarget(filename, 'Backup Libris', ['zip'])
+    if (!target) return
     const blob = await createCsvBackupArchive()
-    const saved = await saveExportBlob(blob, `${backupFileBaseName()}.zip`, 'Backup Libris', ['zip'])
+    const saved = await saveBlobToTarget(blob, target)
     if (saved) {
       modal('exportModal', false)
-      toast('Backup salvo com sucesso.')
     }
   } catch (err) {
     console.error('Falha ao exportar backup CSV:', err)
@@ -1410,7 +1879,7 @@ function clearAdminSubscriptions() { while (state.adminUnsubs.length) try { stat
 
 function resetAdminState() {
   clearAdminSubscriptions()
-  selectedLabelBookIds.clear()
+  selectedLabelQuantities.clear()
   schoolSetupRequired = false
   state.user = null
   state.profile = null
@@ -1432,7 +1901,18 @@ function resetAdminState() {
 }
 
   function selectedLabelBooks() {
-    return state.books.filter((book) => selectedLabelBookIds.has(book.id))
+    return state.books.filter((book) => selectedLabelQuantities.has(book.id))
+  }
+
+  function selectedLabelEntries() {
+    return selectedLabelBooks().map((book) => ({
+      book,
+      quantity: selectedLabelQuantities.get(book.id)
+    }))
+  }
+
+  function selectedLabelCopyCount() {
+    return selectedLabelBooks().reduce((total, book) => total + selectedLabelQuantities.get(book.id), 0)
   }
 
   function labelQrPayload(book) {
@@ -1493,48 +1973,48 @@ function resetAdminState() {
     context.fillStyle = '#1e5b3d'
     context.fillRect(0, 0, 18, canvas.height)
     context.fillStyle = '#1e5b3d'
-    context.font = '700 22px Georgia, serif'
-    context.fillText('LIBRIS', 58, 82)
+    context.font = '700 34px Georgia, serif'
+    context.fillText('LIBRIS', 58, 72)
     context.fillStyle = '#718078'
-    context.font = '600 17px Arial, sans-serif'
-    context.fillText(String(config.schoolName || 'Biblioteca escolar').toLocaleUpperCase('pt-BR').slice(0, 48), 58, 112)
+    context.font = '600 24px Arial, sans-serif'
+    context.fillText(String(config.schoolName || 'Biblioteca escolar').toLocaleUpperCase('pt-BR').slice(0, 48), 58, 108, 650)
     context.strokeStyle = '#e2e9e4'
     context.lineWidth = 2
     context.beginPath()
-    context.moveTo(58, 138)
-    context.lineTo(745, 138)
+    context.moveTo(58, 132)
+    context.lineTo(720, 132)
     context.stroke()
 
     context.fillStyle = '#24352b'
-    context.font = '700 38px Georgia, serif'
-    drawWrappedLabelText(context, book.title || 'Livro sem título', 58, 206, 655, 52, 2)
+    context.font = '700 60px Georgia, serif'
+    drawWrappedLabelText(context, book.title || 'Livro sem título', 58, 198, 650, 68, 2)
     context.fillStyle = '#4f6256'
-    context.font = '500 25px Arial, sans-serif'
-    drawWrappedLabelText(context, book.author || 'Autoria não informada', 58, 326, 650, 34, 2)
+    context.font = '500 38px Arial, sans-serif'
+    drawWrappedLabelText(context, book.author || 'Autoria não informada', 58, 326, 650, 46, 2)
 
     context.fillStyle = '#1e5b3d'
-    context.font = '700 18px Arial, sans-serif'
-    context.fillText(String(book.categoryName || label(book.categoryId) || '').toLocaleUpperCase('pt-BR').slice(0, 42), 58, 418)
+    context.font = '700 29px Arial, sans-serif'
+    context.fillText(String(book.categoryName || label(book.categoryId) || '').toLocaleUpperCase('pt-BR').slice(0, 42), 58, 424, 650)
     context.fillStyle = '#4f6256'
-    context.font = '600 17px Arial, sans-serif'
-    context.fillText(`TOMB.: ${String(book.tombamento || '—').toLocaleUpperCase('pt-BR').slice(0, 32)}`, 58, 455)
+    context.font = '600 28px Arial, sans-serif'
+    context.fillText(`TOMB.: ${String(book.tombamento || '—').toLocaleUpperCase('pt-BR').slice(0, 32)}`, 58, 466, 650)
     context.fillStyle = '#718078'
-    context.font = '600 15px Arial, sans-serif'
-    context.fillText('CÓDIGO DO ACERVO', 58, 490)
+    context.font = '600 22px Arial, sans-serif'
+    context.fillText('CÓDIGO DO ACERVO', 58, 508)
     context.fillStyle = '#24352b'
-    context.font = '700 34px Arial, sans-serif'
-    context.fillText(String(book.code || '').toLocaleUpperCase('pt-BR').slice(0, 18), 58, 540)
+    context.font = '700 52px Arial, sans-serif'
+    context.fillText(String(book.code || '').toLocaleUpperCase('pt-BR').slice(0, 18), 58, 566, 650)
 
     context.fillStyle = '#ffffff'
-    context.fillRect(770, 144, 300, 324)
-    context.drawImage(qrImage, 780, 154, 280, 280)
+    context.fillRect(744, 140, 350, 390)
+    context.drawImage(qrImage, 750, 146, 338, 338)
     context.fillStyle = '#718078'
-    context.font = '700 14px Arial, sans-serif'
+    context.font = '700 20px Arial, sans-serif'
     context.textAlign = 'center'
-    context.fillText('IDENTIFICAÇÃO DIGITAL', 920, 455)
+    context.fillText('IDENTIFICAÇÃO DIGITAL', 919, 512)
     context.fillStyle = '#1e5b3d'
-    context.font = '700 17px Arial, sans-serif'
-    context.fillText('ESCANEIE PARA CONFERIR', 920, 484)
+    context.font = '700 22px Arial, sans-serif'
+    context.fillText('ESCANEIE PARA CONFERIR', 919, 542)
     context.textAlign = 'start'
 
     return canvas
@@ -1548,12 +2028,20 @@ function resetAdminState() {
     const queryText = ($('#labelBookSearchInput')?.value || '').trim().toLocaleLowerCase('pt-BR')
     const books = state.books.filter((book) => !queryText || [book.title, book.author, book.code].some((value) => String(value || '').toLocaleLowerCase('pt-BR').includes(queryText)))
 
-    list.innerHTML = books.length ? books.map((book) => `
-      <label class="label-book-option">
-        <input type="checkbox" data-label-book="${esc(book.id)}" ${selectedLabelBookIds.has(book.id) ? 'checked' : ''} />
-        <span><strong>${esc(book.title || 'Livro sem título')}</strong><small>${esc(book.code || 'Sem código')} · ${esc(book.author || 'Autoria não informada')}</small></span>
-      </label>
-    `).join('') : '<p class="label-book-empty">Nenhum livro encontrado nesta escola.</p>'
+    list.innerHTML = books.length ? books.map((book) => {
+      const quantity = selectedLabelQuantities.get(book.id) || 1
+      const selected = selectedLabelQuantities.has(book.id)
+      return `
+        <div class="label-book-option">
+          <input type="checkbox" data-label-book="${esc(book.id)}" aria-label="Selecionar ${esc(book.title || 'livro sem título')}" ${selected ? 'checked' : ''} />
+          <span><strong>${esc(book.title || 'Livro sem título')}</strong><small>${esc(book.code || 'Sem código')} · ${esc(book.author || 'Autoria não informada')}</small></span>
+          <label class="label-book-quantity">
+            <span>Qtd.</span>
+            <input type="number" min="1" value="${quantity}" data-label-quantity="${esc(book.id)}" aria-label="Quantidade de etiquetas para ${esc(book.title || 'livro sem título')}" ${selected ? '' : 'disabled'} />
+          </label>
+        </div>
+      `
+    }).join('') : '<p class="label-book-empty">Nenhum livro encontrado nesta escola.</p>'
   }
 
   async function updateLabelPreview() {
@@ -1566,12 +2054,13 @@ function resetAdminState() {
     const pdfButton = $('#downloadLabelsPdfBtn')
     const requestId = ++labelPreviewRequest
 
-    if (count) count.textContent = `${books.length} selecionado${books.length === 1 ? '' : 's'}`
+    const copyCount = selectedLabelCopyCount()
+    if (count) count.textContent = `${copyCount} etiqueta${copyCount === 1 ? '' : 's'} · ${books.length} livro${books.length === 1 ? '' : 's'}`
     if (jpgButton) {
-      jpgButton.disabled = books.length === 0 || books.length > 20
-      jpgButton.title = books.length > 20 ? 'Selecione até 20 livros para gerar uma única folha JPG.' : ''
+      jpgButton.disabled = copyCount === 0 || copyCount > 10
+      jpgButton.title = copyCount > 10 ? 'A folha A4 JPG comporta até 10 etiquetas. Reduza as quantidades ou use PDF.' : ''
     }
-    if (pdfButton) pdfButton.disabled = books.length === 0
+    if (pdfButton) pdfButton.disabled = copyCount === 0
 
     if (!books.length) {
       if (empty) empty.hidden = false
@@ -1591,7 +2080,9 @@ function resetAdminState() {
       const context = canvas.getContext('2d')
       context?.clearRect(0, 0, canvas.width, canvas.height)
       context?.drawImage(labelCanvas, 0, 0, canvas.width, canvas.height)
-      if (caption) caption.textContent = books.length > 1 ? `Prévia da primeira de ${books.length} etiquetas.` : 'Etiqueta no formato pronto para impressão.'
+      if (caption) caption.textContent = copyCount > 1
+        ? `Prévia de ${books[0].title || 'livro selecionado'}. Serão geradas ${copyCount} etiquetas.`
+        : 'Etiqueta no formato pronto para impressão.'
     } catch (err) {
       console.error('Falha ao gerar prévia QR:', err)
       if (caption) caption.textContent = 'Não foi possível gerar o QR. Confira sua conexão e tente novamente.'
@@ -1603,36 +2094,45 @@ function resetAdminState() {
     updateLabelPreview()
   }
 
-  function downloadCanvas(canvas, filename) {
-    const link = document.createElement('a')
-    link.download = filename
-    link.href = canvas.toDataURL('image/jpeg', 0.94)
-    link.click()
-  }
-
   async function downloadLabelSheetJpg() {
-    const books = selectedLabelBooks()
-    if (!books.length || books.length > 20) return
+    const entries = selectedLabelEntries()
+    const copyCount = selectedLabelCopyCount()
+    if (!copyCount || copyCount > 10) return
     const button = $('#downloadLabelsJpgBtn')
+    const filename = `etiquetas-${String(config.currentSchoolId).replace(/[^a-z0-9_-]/gi, '_')}.jpg`
     loading(button, true, 'Gerando JPG…')
     try {
-      const labels = await Promise.all(books.map(createBookLabelCanvas))
+      const target = await chooseSaveTarget(filename, 'Imagem JPG', ['jpg'])
+      if (!target) return
+      const labels = []
+      for (const { book, quantity } of entries) {
+        const labelCanvas = await createBookLabelCanvas(book)
+        for (let copy = 0; copy < quantity; copy += 1) labels.push(labelCanvas)
+      }
       const columns = 2
-      const rows = Math.ceil(labels.length / columns)
-      const gap = 24
+      const dpi = 300
+      const pxPerMm = dpi / 25.4
+      const cardWidth = Math.round(90 * pxPerMm)
+      const cardHeight = Math.round(cardWidth * 600 / 1104)
+      const columnGap = Math.round(10 * pxPerMm)
+      const rowGap = Math.round(5 * pxPerMm)
+      const leftMargin = Math.round(10 * pxPerMm)
+      const topMargin = Math.round(14 * pxPerMm)
       const sheet = document.createElement('canvas')
-      sheet.width = 2 * 1104 + 3 * gap
-      sheet.height = rows * 600 + (rows + 1) * gap
+      sheet.width = 2480
+      sheet.height = 3508
       const context = sheet.getContext('2d')
+      if (!context) throw new Error('Não foi possível preparar a folha JPG.')
       context.fillStyle = '#f1f4f1'
       context.fillRect(0, 0, sheet.width, sheet.height)
       labels.forEach((labelCanvas, index) => {
         const column = index % columns
         const row = Math.floor(index / columns)
-        context.drawImage(labelCanvas, gap + column * (1104 + gap), gap + row * (600 + gap))
+        const x = leftMargin + column * (cardWidth + columnGap)
+        const y = topMargin + row * (cardHeight + rowGap)
+        context.drawImage(labelCanvas, x, y, cardWidth, cardHeight)
       })
-      const safeSchoolId = String(config.currentSchoolId).replace(/[^a-z0-9_-]/gi, '_')
-      downloadCanvas(sheet, `etiquetas-${safeSchoolId}.jpg`)
+      await saveBlobToTarget(await canvasToBlob(sheet), target)
     } catch (err) {
       console.error('Falha ao gerar etiquetas JPG:', err)
       toast('Não foi possível gerar o JPG. Tente novamente.', 'error')
@@ -1642,11 +2142,14 @@ function resetAdminState() {
   }
 
   async function downloadLabelSheetPdf() {
-    const books = selectedLabelBooks()
-    if (!books.length) return
+    const entries = selectedLabelEntries()
+    if (!selectedLabelCopyCount()) return
     const button = $('#downloadLabelsPdfBtn')
+    const filename = `etiquetas-${String(config.currentSchoolId).replace(/[^a-z0-9_-]/gi, '_')}.pdf`
     loading(button, true, 'Gerando PDF…')
     try {
+      const target = await chooseSaveTarget(filename, 'Documento PDF', ['pdf'])
+      if (!target) return
       const { jsPDF } = await import('https://cdn.jsdelivr.net/npm/jspdf@2.5.2/+esm')
       const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true })
       const cardWidth = 90
@@ -1656,20 +2159,24 @@ function resetAdminState() {
       const leftMargin = 10
       const topMargin = 14
 
-      for (const [index, book] of books.entries()) {
-        if (index > 0 && index % 10 === 0) pdf.addPage()
-        const position = index % 10
-        const column = position % 2
-        const row = Math.floor(position / 2)
-        const x = leftMargin + column * (cardWidth + columnGap)
-        const y = topMargin + row * (cardHeight + rowGap)
+      let index = 0
+      for (const { book, quantity } of entries) {
         const labelCanvas = await createBookLabelCanvas(book)
-        pdf.addImage(labelCanvas.toDataURL('image/jpeg', 0.95), 'JPEG', x, y, cardWidth, cardHeight, undefined, 'FAST')
+        const image = labelCanvas.toDataURL('image/jpeg', 0.95)
+        for (let copy = 0; copy < quantity; copy += 1) {
+          if (index > 0 && index % 10 === 0) pdf.addPage()
+          const position = index % 10
+          const column = position % 2
+          const row = Math.floor(position / 2)
+          const x = leftMargin + column * (cardWidth + columnGap)
+          const y = topMargin + row * (cardHeight + rowGap)
+          pdf.addImage(image, 'JPEG', x, y, cardWidth, cardHeight, undefined, 'FAST')
+          index += 1
+        }
       }
 
       pdf.setProperties({ title: `Etiquetas de ${config.schoolName}`, subject: `Acervo ${config.currentSchoolId}`, author: 'Libris' })
-      const safeSchoolId = String(config.currentSchoolId).replace(/[^a-z0-9_-]/gi, '_')
-      pdf.save(`etiquetas-${safeSchoolId}.pdf`)
+      await saveBlobToTarget(pdf.output('blob'), target)
     } catch (err) {
       console.error('Falha ao gerar etiquetas PDF:', err)
       toast('Não foi possível gerar o PDF. Tente novamente.', 'error')
@@ -1717,6 +2224,7 @@ async function subscribeAdmin() {
         return { id: d.id, ...data, total, available, status: available > 0 ? 'disponivel' : 'emprestado' }
       })
       renderBooks(); renderDashboard()
+      updateLoanQuantityLimit(state.readers.find((reader) => reader.id === $('#loanReaderIdInput')?.value))
     }),
     watchAdminCollection('categories', activeSchoolId, (snap) => {
       state.categories = snap.docs.map((d) => ({ ...d.data(), id: d.data().id || d.id, docId: d.id }))
@@ -1729,6 +2237,7 @@ async function subscribeAdmin() {
     watchAdminCollection('loans', activeSchoolId, (snap) => {
       state.loans = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
       renderLoans(); renderDashboard()
+      updateLoanQuantityLimit(state.readers.find((reader) => reader.id === $('#loanReaderIdInput')?.value))
     })
   ])
 }
@@ -1859,8 +2368,11 @@ function renderLoans() {
     const selectedDays = Number(l.days || 7)
     const reader = state.readers.find((item) => item.id === l.readerId)
     const maximum = getMaxLoanDaysForReader(reader)
-    const renewalDays = Math.min(Math.max(1, selectedDays), maximum)
-    return `<tr><td>${esc(l.bookTitle)}<br><small>${esc(l.bookCode)}</small></td><td>${esc(l.readerName)}</td><td><div>${formatDate(l.dueAt)}</div><small>Prazo: ${selectedDays} dias</small></td><td><span class="badge ${overdue(l) ? 'borrowed' : 'available'}">${overdue(l) ? 'Em atraso' : 'Em dia'}</span></td><td><div class="action-row"><input class="renew-days" type="number" min="1" max="${maximum}" value="${renewalDays}" data-renew-days="${esc(l.id)}" aria-label="Dias para renovar (máximo ${maximum})"><button class="small-btn primary" data-return="${esc(l.id)}" type="button">Devolver</button><button class="small-btn warning" data-renew="${esc(l.id)}" type="button">Renovar</button><button class="small-btn danger" data-notify="${esc(l.id)}" type="button">Notificar</button></div></td></tr>`
+    const renewalDays = Math.max(1, maximum === null ? selectedDays : Math.min(selectedDays, maximum))
+    const maximumAttribute = maximum === null ? '' : `max="${maximum}"`
+    const renewalLabel = maximum === null ? 'Dias para renovar' : `Dias para renovar (máximo ${maximum})`
+    const copyCount = loanQuantity(l)
+    return `<tr><td>${esc(l.bookTitle)}<br><small>${esc(l.bookCode)}${copyCount > 1 ? ` · ${copyCount} exemplares` : ''}</small></td><td>${esc(l.readerName)}</td><td><div>${formatDate(l.dueAt)}</div><small>Prazo: ${selectedDays} dias</small></td><td><span class="badge ${overdue(l) ? 'borrowed' : 'available'}">${overdue(l) ? 'Em atraso' : 'Em dia'}</span></td><td><div class="action-row"><input class="renew-days" type="number" min="1" ${maximumAttribute} value="${renewalDays}" data-renew-days="${esc(l.id)}" aria-label="${renewalLabel}"><button class="small-btn primary" data-return="${esc(l.id)}" type="button">Devolver</button><button class="small-btn warning" data-renew="${esc(l.id)}" type="button">Renovar</button><button class="small-btn danger" data-notify="${esc(l.id)}" type="button">Notificar</button></div></td></tr>`
   }).join('') : '<tr><td colspan="5" class="text-center">Nenhum empréstimo corresponde à busca e aos filtros.</td></tr>'
 
   $$('[data-return]').forEach((b) => b.onclick = () => returnLoan(b.dataset.return))
@@ -1886,7 +2398,7 @@ async function notify(id) {
     const emailTarget = reader?.email || loan.readerEmail || 'E-mail não informado'
     $('#notificationContact').textContent = `${emailTarget} · ${reader?.phone || 'Telefone não informado'}`
   }
-  if ($('#notificationMessage')) $('#notificationMessage').value = `Olá, ${loan.readerName}. O empréstimo do livro "${loan.bookTitle}" vence em ${formatDate(loan.dueAt)}. Por favor, procure a biblioteca escolar.`
+  if ($('#notificationMessage')) $('#notificationMessage').value = `Olá, ${loan.readerName}. O empréstimo de ${loanQuantity(loan)} exemplar(es) do livro "${loan.bookTitle}" vence em ${formatDate(loan.dueAt)}. Por favor, procure a biblioteca escolar.`
   const modalEl = $('#notificationModal')
   if (modalEl) modalEl.dataset.loanId = String(id)
   modal('notificationModal', true)
@@ -2088,10 +2600,15 @@ function setup() {
   if ($('#readerSearchInput')) $('#readerSearchInput').oninput = (x) => { state.readerQuery = x.target.value; renderReaders() }
   if ($('#readerFilterSelect')) $('#readerFilterSelect').onchange = (event) => { state.readerFilter = event.target.value; renderReaders() }
   if ($('#loanSearchInput')) $('#loanSearchInput').oninput = (x) => { state.loanQuery = x.target.value; renderLoans() }
+  if ($('#bookCodeInput')) $('#bookCodeInput').oninput = () => {
+    const reader = state.readers.find((item) => item.id === $('#loanReaderIdInput')?.value)
+    updateLoanQuantityLimit(reader)
+  }
   if ($('#readerInput')) {
     $('#readerInput').oninput = () => {
       if ($('#loanReaderIdInput')) $('#loanReaderIdInput').value = ''
       updateLoanDaysLimit(null, true)
+      updateLoanQuantityLimit(null)
       renderReaderSelector()
     }
     $('#readerInput').onkeydown = (event) => {
@@ -2156,6 +2673,10 @@ function setup() {
     if ($('#loginForm')) $('#loginForm').hidden = false
   }
   if ($('#schoolSettingsForm')) $('#schoolSettingsForm').onsubmit = saveSchoolSettings
+  if ($('#themePreferenceInput')) {
+    $('#themePreferenceInput').value = getThemePreference()
+    $('#themePreferenceInput').onchange = (event) => applyThemePreference(event.target.value, true)
+  }
   if ($('#readerTypeInput')) $('#readerTypeInput').onchange = updateReaderFields
   if ($('#registerLoanBtn')) $('#registerLoanBtn').onclick = registerLoan
   updateLoanDaysLimit(null)
@@ -2176,22 +2697,42 @@ function setup() {
   if ($('#labelBookSearchInput')) $('#labelBookSearchInput').oninput = renderLabelBookList
   if ($('#labelBookList')) $('#labelBookList').onchange = (event) => {
     const checkbox = event.target.closest('[data-label-book]')
-    if (!checkbox) return
-    if (checkbox.checked) selectedLabelBookIds.add(checkbox.dataset.labelBook)
-    else selectedLabelBookIds.delete(checkbox.dataset.labelBook)
-    updateLabelPreview()
+    if (checkbox) {
+      if (checkbox.checked) selectedLabelQuantities.set(checkbox.dataset.labelBook, 1)
+      else selectedLabelQuantities.delete(checkbox.dataset.labelBook)
+      renderLabelSelection()
+      return
+    }
+
+    const quantityInput = event.target.closest('[data-label-quantity]')
+    if (!quantityInput) return
+    const bookId = quantityInput.dataset.labelQuantity
+    if (!selectedLabelQuantities.has(bookId)) return
+    const quantity = Number(quantityInput.value)
+    if (!Number.isSafeInteger(quantity) || quantity < 1) {
+      toast('Informe uma quantidade inteira de etiquetas maior que zero.', 'error')
+      renderLabelBookList()
+      return
+    }
+    selectedLabelQuantities.set(bookId, quantity)
+    renderLabelSelection()
   }
   if ($('#selectLabelSearchResultsBtn')) $('#selectLabelSearchResultsBtn').onclick = () => {
     const queryText = ($('#labelBookSearchInput')?.value || '').trim().toLocaleLowerCase('pt-BR')
-    state.books.filter((book) => !queryText || [book.title, book.author, book.code].some((value) => String(value || '').toLocaleLowerCase('pt-BR').includes(queryText))).forEach((book) => selectedLabelBookIds.add(book.id))
+    state.books.filter((book) => !queryText || [book.title, book.author, book.code].some((value) => String(value || '').toLocaleLowerCase('pt-BR').includes(queryText))).forEach((book) => {
+      if (!selectedLabelQuantities.has(book.id)) selectedLabelQuantities.set(book.id, 1)
+    })
     renderLabelSelection()
   }
   if ($('#clearLabelSelectionBtn')) $('#clearLabelSelectionBtn').onclick = () => {
-    selectedLabelBookIds.clear()
+    selectedLabelQuantities.clear()
     renderLabelSelection()
   }
   if ($('#downloadLabelsJpgBtn')) $('#downloadLabelsJpgBtn').onclick = downloadLabelSheetJpg
   if ($('#downloadLabelsPdfBtn')) $('#downloadLabelsPdfBtn').onclick = downloadLabelSheetPdf
+  if ($('#downloadDashboardJpgBtn')) $('#downloadDashboardJpgBtn').onclick = downloadDashboardChartsJpg
+  if ($('#downloadDashboardPdfBtn')) $('#downloadDashboardPdfBtn').onclick = downloadDashboardChartsPdf
+  if ($('#downloadDashboardReportBtn')) $('#downloadDashboardReportBtn').onclick = downloadDashboardReport
 
   if ($('#cancelBookEditBtn')) $('#cancelBookEditBtn').onclick = () => modal('bookFormModal', false)
   if ($('#cancelReaderEditBtn')) $('#cancelReaderEditBtn').onclick = () => modal('readerFormModal', false)
@@ -2455,6 +2996,7 @@ async function saveSchoolSettings(event) {
     config.teacherLoanDays = teacherLoanDays
     const selectedReader = state.readers.find((reader) => reader.id === $('#loanReaderIdInput')?.value)
     updateLoanDaysLimit(selectedReader)
+    updateLoanQuantityLimit(selectedReader)
     syncSchoolSettingsForm(config)
     await logAudit(schoolSetupRequired ? 'school_initialized' : 'school_settings_updated', { schoolId: config.currentSchoolId, schoolName, coordinationEmail, maxBooksStudent, maxBooksTeacher, studentLoanDays, teacherLoanDays }, state.user?.uid || null)
 
@@ -2484,6 +3026,7 @@ function syncSchoolSettingsForm(data = config) {
   const maxBooksTeacherInput = $('#maxBooksTeacherInput')
   const studentLoanDaysInput = $('#studentLoanDaysInput')
   const teacherLoanDaysInput = $('#teacherLoanDaysInput')
+  const themePreferenceInput = $('#themePreferenceInput')
   const settings = data || {}
 
   if (schoolNameInput) schoolNameInput.value = settings.schoolName || ''
@@ -2492,6 +3035,7 @@ function syncSchoolSettingsForm(data = config) {
   if (maxBooksTeacherInput) maxBooksTeacherInput.value = String(settings.maxBooksTeacher ?? 35)
   if (studentLoanDaysInput) studentLoanDaysInput.value = String(settings.studentLoanDays ?? 7)
   if (teacherLoanDaysInput) teacherLoanDaysInput.value = String(settings.teacherLoanDays ?? 21)
+  if (themePreferenceInput) themePreferenceInput.value = getThemePreference()
 }
 
 /* Load school settings after local email authorization. */

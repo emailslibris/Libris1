@@ -13,6 +13,16 @@
       name="description"
       content="Painel administrativo da biblioteca escolar Libris."
     />
+    <script>
+      try {
+        const savedTheme = localStorage.getItem('libris-theme')
+        if (savedTheme === 'light' || savedTheme === 'dark') {
+          document.documentElement.dataset.theme = savedTheme
+        }
+      } catch (error) {
+        console.warn('Não foi possível carregar a preferência de aparência.', error)
+      }
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -52,7 +62,7 @@
         <section class="modal-card small" role="dialog" aria-modal="true" aria-labelledby="aboutModalTitle">
           <button class="modal-close" type="button" data-close="aboutModal" aria-label="Fechar">×</button>
           <h3 id="aboutModalTitle">Sobre o Libris</h3>
-          <p class="modal-description">Sistema de gestão para bibliotecas escolares, versão 1.2.0.</p>
+          <p class="modal-description">Sistema de gestão para bibliotecas escolares, versão 1.2.1.</p>
           <dl class="about-details">
             <div><dt>Desenvolvimento</dt><dd>Vinicius e Alyssa</dd></div>
             <div><dt>Tecnologias</dt><dd>HTML, CSS, JavaScript e Rust (Tauri)</dd></div>
@@ -187,6 +197,37 @@
 
           <div id="kpiGrid" class="kpi-grid"></div>
 
+          <section class="dashboard-export panel" aria-label="Exportar gráficos e relatórios">
+            <div class="dashboard-export-heading">
+              <div>
+                <h3>Exportações do painel</h3>
+                <p>Escolha o período e baixe os gráficos gerais ou o relatório da biblioteca.</p>
+              </div>
+              <label class="dashboard-period">
+                <span>Período</span>
+                <select id="dashboardExportPeriod">
+                  <option value="7">Semanal — últimos 7 dias</option>
+                  <option value="15">Quinzenal — últimos 15 dias</option>
+                  <option value="30" selected>Mensal — últimos 30 dias</option>
+                  <option value="90">Trimestral — últimos 90 dias</option>
+                  <option value="365">Anual — últimos 365 dias</option>
+                  <option value="all">Todo o período</option>
+                </select>
+              </label>
+            </div>
+            <div class="dashboard-export-actions">
+              <div class="dashboard-export-group">
+                <strong>Gráficos gerais</strong>
+                <button class="btn btn-secondary" id="downloadDashboardJpgBtn" type="button">Baixar gráficos JPG</button>
+                <button class="btn btn-secondary" id="downloadDashboardPdfBtn" type="button">Baixar gráficos PDF</button>
+              </div>
+              <div class="dashboard-export-group">
+                <strong>Relatório</strong>
+                <button class="btn btn-primary" id="downloadDashboardReportBtn" type="button">Baixar relatório PDF</button>
+              </div>
+            </div>
+          </section>
+
           <div class="dashboard-grid">
             <div class="panel chart-panel">
               <div class="panel-head">
@@ -288,10 +329,15 @@
                       <div id="readerSuggestions" class="reader-suggestions" role="listbox" hidden></div>
                     </div>
                   </label>
+                  <label id="loanQuantityField" hidden>
+                    <span>Quantidade de exemplares</span>
+                    <input id="loanQuantity" type="number" min="1" value="1" aria-describedby="loanQuantityHelp" required />
+                    <small id="loanQuantityHelp" class="field-help" hidden></small>
+                  </label>
                   <label>
                     <span>Prazo</span>
-                    <input id="loanDays" type="number" min="1" max="7" value="7" required />
-                    <small id="loanDaysHelp" class="field-help">Prazo máximo para aluno: 7 dias.</small>
+                    <input id="loanDays" type="number" min="1" value="7" required />
+                    <small id="loanDaysHelp" class="field-help" hidden></small>
                   </label>
                 </div>
                 <button class="btn btn-primary" type="button" id="registerLoanBtn">Registrar empréstimo</button>
@@ -341,7 +387,7 @@
                   <h3>Acervo</h3>
                 </div>
                 <div class="action-row">
-                  <button class="btn btn-secondary" type="button" id="openBookLabelsBtn">Etiquetas QR</button>
+                  <button class="btn btn-secondary" type="button" id="openBookLabelsBtn">Gerar etiquetas</button>
                   <button class="btn btn-primary" type="button" id="openBookModalBtn">+ Adicionar Novo Livro</button>
                 </div>
               </div>
@@ -525,6 +571,15 @@
             <span>Prazo máximo de empréstimo para professor (dias)</span>
             <input id="teacherLoanDaysInput" type="number" min="1" max="180" value="21" required />
           </label>
+          <label>
+            <span>Aparência</span>
+            <select id="themePreferenceInput" aria-describedby="themePreferenceHelp">
+              <option value="system">Automática (seguir dispositivo)</option>
+              <option value="light">Claro</option>
+              <option value="dark">Escuro</option>
+            </select>
+            <small id="themePreferenceHelp" class="field-help">Esta preferência fica salva somente neste dispositivo.</small>
+          </label>
           <div class="settings-actions">
             <button class="btn btn-primary" type="submit">Salvar configurações</button>
           </div>
@@ -540,7 +595,7 @@
           <span class="label-heading-mark" aria-hidden="true">L</span>
           <div>
             <h3 id="bookLabelsTitle">Etiquetas do acervo</h3>
-            <p>Selecione os livros para montar as etiquetas QR.</p>
+            <p>Selecione os livros e informe quantas etiquetas gerar para cada um.</p>
           </div>
         </div>
         <div class="label-generator-layout">
@@ -566,7 +621,7 @@
           </section>
         </div>
         <div class="label-modal-footer">
-          <span>JPG gera uma folha de até 20 etiquetas. PDF aceita seleções maiores.</span>
+          <span>JPG gera uma folha A4 de até 10 etiquetas. PDF distribui quantidades maiores em várias páginas.</span>
           <div class="action-row">
             <button class="btn btn-secondary" id="downloadLabelsJpgBtn" type="button" disabled>Baixar JPG</button>
             <button class="btn btn-primary" id="downloadLabelsPdfBtn" type="button" disabled>Baixar PDF</button>
