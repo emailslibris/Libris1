@@ -290,11 +290,8 @@
                   </label>
                   <label>
                     <span>Prazo</span>
-                    <select id="loanDays">
-                      <option value="7">7 dias</option>
-                      <option value="14">14 dias</option>
-                      <option value="21">21 dias</option>
-                    </select>
+                    <input id="loanDays" type="number" min="1" max="7" value="7" required />
+                    <small id="loanDaysHelp" class="field-help">Prazo máximo para aluno: 7 dias.</small>
                   </label>
                 </div>
                 <button class="btn btn-primary" type="button" id="registerLoanBtn">Registrar empréstimo</button>
@@ -344,7 +341,6 @@
                   <h3>Acervo</h3>
                 </div>
                 <div class="action-row">
-                  <button class="btn btn-secondary" type="button" id="openCategoryModalBtn">+ Nova Categoria</button>
                   <button class="btn btn-secondary" type="button" id="openBookLabelsBtn">Etiquetas QR</button>
                   <button class="btn btn-primary" type="button" id="openBookModalBtn">+ Adicionar Novo Livro</button>
                 </div>
@@ -401,6 +397,7 @@
                   <select id="readerFilterSelect">
                     <option value="all">Todos</option>
                     <option value="students">Alunos</option>
+                    <option value="teachers">Professores</option>
                     <option value="others">Outros</option>
                   </select>
                 </label>
@@ -456,7 +453,10 @@
           </label>
           <label>
             <span>Senha</span>
-            <input id="localLoginPasswordInput" type="password" autocomplete="current-password" required />
+            <div class="password-input">
+              <input id="localLoginPasswordInput" type="password" autocomplete="current-password" required />
+              <button class="password-toggle" id="toggleLocalPasswordBtn" type="button" aria-label="Mostrar senha" aria-pressed="false">👁</button>
+            </div>
           </label>
           <button class="btn btn-primary" id="localLoginBtn" type="submit">Entrar</button>
           <button class="btn btn-ghost" id="openCredeLoginBtn" type="button">Configuração local (CREDE)</button>
@@ -516,6 +516,14 @@
           <label>
             <span>Limite de livros ativos por professor</span>
             <input id="maxBooksTeacherInput" type="number" min="1" max="200" value="35" />
+          </label>
+          <label>
+            <span>Prazo máximo de empréstimo para aluno (dias)</span>
+            <input id="studentLoanDaysInput" type="number" min="1" max="180" value="7" required />
+          </label>
+          <label>
+            <span>Prazo máximo de empréstimo para professor (dias)</span>
+            <input id="teacherLoanDaysInput" type="number" min="1" max="180" value="21" required />
           </label>
           <div class="settings-actions">
             <button class="btn btn-primary" type="submit">Salvar configurações</button>

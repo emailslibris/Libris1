@@ -25,8 +25,31 @@ const config = {
   coordinationDays: 7,
   maxBooksStudent: 2,
   maxBooksTeacher: 35,
+  studentLoanDays: 7,
   teacherLoanDays: 21,
   smtp: { host: '', port: 587, username: '' }
+}
+
+function getMaxLoanDaysForReader(reader) {
+  const configuredDays = isTeacherReader(reader) ? config.teacherLoanDays : config.studentLoanDays
+  const fallback = isTeacherReader(reader) ? 21 : 7
+  return Math.min(180, Math.max(1, Math.trunc(Number(configuredDays) || fallback)))
+}
+
+function updateLoanDaysLimit(reader, resetToMaximum = false) {
+  const input = $('#loanDays')
+  if (!input) return
+  const maximum = getMaxLoanDaysForReader(reader)
+  input.max = String(maximum)
+  const currentDays = Number(input.value)
+  if (resetToMaximum || !Number.isInteger(currentDays) || currentDays < 1 || currentDays > maximum) {
+    input.value = String(maximum)
+  }
+  const help = $('#loanDaysHelp')
+  if (help) {
+    const profile = isTeacherReader(reader) ? 'professor' : 'aluno'
+    help.textContent = `Prazo máximo para ${profile}: ${maximum} dias. Informe um valor entre 1 e ${maximum}.`
+  }
 }
 
 const defaultCategories = []
@@ -61,6 +84,20 @@ const $$ = (s) => (typeof document !== 'undefined' ? Array.from(document?.queryS
 const esc = (v = '') => String(v).replace(/[&<>'"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[c])
 const getCategoryOptions = () => (state.categories.length ? state.categories : defaultCategories)
 const label = (id) => getCategoryOptions().find((x) => x.id === id)?.name || categories.find((x) => x.id === id)?.name || 'Geral'
+function bookCategoryName(book = {}) {
+  const options = getCategoryOptions()
+  const prefix = String(book.code || '').match(/^([A-Z0-9]{1,4})-\d{4}$/i)?.[1]
+  const candidates = [book.categoryId, book.categoryName, prefix]
+    .filter(Boolean)
+    .map((value) => String(value).trim().toLocaleLowerCase('pt-BR'))
+
+  for (const candidate of candidates) {
+    const category = options.find((item) => [item.id, item.docId, item.code, item.name]
+      .some((value) => String(value || '').trim().toLocaleLowerCase('pt-BR') === candidate))
+    if (category?.name) return category.name
+  }
+  return String(book.categoryName || book.categoryId || prefix || 'Geral')
+}
 const available = (b) => Number(b.available || 0) > 0
 const bookStatus = (b) => available(b) ? 'disponivel' : 'emprestado'
 const date = (v) => v?.toDate ? v.toDate() : v ? new Date(v) : null
@@ -147,7 +184,7 @@ function renderBooks() {
   if (!body) return;
   const q = state.acervoQuery.toLowerCase().trim()
   const list = state.books.filter((b) => !q || [b.title, b.author, b.code].some((x) => String(x || '').toLowerCase().includes(q)))
-  body.innerHTML = list.length ? list.map((b) => `<tr><td>${esc(b.code)}</td><td>${esc(b.title)}</td><td>${esc(label(b.categoryId))}</td><td>${esc(b.tombamento || 'Não informado')}</td><td>${Number(b.total || 0)}</td><td>${esc(b.shelf || '—')}</td><td><span class="badge ${bookStatus(b) === 'disponivel' ? 'available' : 'borrowed'}">${bookStatus(b) === 'disponivel' ? 'Disponível' : 'Emprestado'}</span></td><td><div class="action-row"><button class="small-btn primary" type="button" data-edit-book="${b.id}">Editar</button><button class="small-btn danger" type="button" data-del-book="${b.id}">Apagar</button></div></td></tr>`).join('') : '<tr><td colspan="8">Nenhum livro cadastrado.</td></tr>';
+  body.innerHTML = list.length ? list.map((b) => `<tr><td>${esc(b.code)}</td><td>${esc(b.title)}</td><td>${esc(bookCategoryName(b))}</td><td>${esc(b.tombamento || 'Não informado')}</td><td>${Number(b.total || 0)}</td><td>${esc(b.shelf || '—')}</td><td><span class="badge ${bookStatus(b) === 'disponivel' ? 'available' : 'borrowed'}">${bookStatus(b) === 'disponivel' ? 'Disponível' : 'Emprestado'}</span></td><td><div class="action-row"><button class="small-btn primary" type="button" data-edit-book="${b.id}">Editar</button><button class="small-btn danger" type="button" data-del-book="${b.id}">Apagar</button></div></td></tr>`).join('') : '<tr><td colspan="8">Nenhum livro cadastrado.</td></tr>';
   $$('[data-edit-book]').forEach((b) => b.onclick = () => editBook(b.dataset.editBook)); 
   $$('[data-del-book]').forEach((b) => b.onclick = () => removeBook(b.dataset.delBook))
 }
@@ -194,6 +231,7 @@ function selectLoanReader(readerId) {
 
   input.value = `${reader.name || ''}${reader.matricula ? ` · ${reader.matricula}` : ''}`
   selectedId.value = reader.id
+  updateLoanDaysLimit(reader)
   if (suggestions) {
     suggestions.replaceChildren()
     suggestions.hidden = true
@@ -207,7 +245,14 @@ function renderReaders() {
   const q = state.readerQuery.toLowerCase().trim()
   const list = state.readers.filter((reader) => {
     const student = isStudentReader(reader)
-    const matchesFilter = state.readerFilter === 'students' ? student : state.readerFilter === 'others' ? !student : true
+    const teacher = isTeacherReader(reader)
+    const matchesFilter = state.readerFilter === 'students'
+      ? student
+      : state.readerFilter === 'teachers'
+        ? teacher
+        : state.readerFilter === 'others'
+          ? !student && !teacher
+          : true
     return matchesFilter && (!q || [reader.name, reader.type, reader.role, reader.matricula].some((x) => String(x || '').toLowerCase().includes(q)))
   })
   body.innerHTML = list.length ? list.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.type || r.role || 'Aluno')}</td><td>${esc(r.course || r.class || 'Não se aplica')}</td><td>${esc(r.type === 'Aluno' ? r.matricula : r.cpf || 'Não informado')}</td><td>${esc(r.email || '—')}<br><small>${esc(r.phone || '')}</small></td><td><div class="action-row"><button class="small-btn primary" type="button" data-edit-reader="${r.id}">Editar</button><button class="small-btn danger" type="button" data-del-reader="${r.id}">Apagar</button></div></td></tr>`).join('') : '<tr><td colspan="6">Nenhum leitor cadastrado.</td></tr>';
@@ -220,6 +265,12 @@ function isStudentReader(reader) {
   const type = String(reader?.type || '').toLocaleLowerCase('pt-BR')
   const role = String(reader?.role || '').toLocaleLowerCase('pt-BR')
   return type === 'aluno' || role === 'student' || (!type && !role)
+}
+
+function isTeacherReader(reader) {
+  const type = String(reader?.type || '').toLocaleLowerCase('pt-BR')
+  const role = String(reader?.role || '').toLocaleLowerCase('pt-BR')
+  return type === 'professor' || role === 'teacher'
 }
 
 function count(list, key) { const map = new Map(); list.forEach((x) => { const k = key(x); map.set(k, (map.get(k) || 0) + 1) }); return [...map].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value) }
@@ -586,7 +637,7 @@ async function registerLoan() {
   const code = $('#bookCodeInput')?.value.trim().toUpperCase()
   const text = $('#readerInput')?.value.trim()
   const selectedReaderId = $('#loanReaderIdInput')?.value
-  const days = Number($('#loanDays')?.value || 7)
+  const days = Number($('#loanDays')?.value)
   const book = state.books.find((b) => b.code?.toUpperCase() === code)
   const reader = selectedReaderId ? state.readers.find((r) => r.id === selectedReaderId) : state.readers.find((r) => r.matricula === text || r.name?.toLocaleLowerCase('pt-BR') === text?.toLocaleLowerCase('pt-BR'))
 
@@ -613,7 +664,12 @@ async function registerLoan() {
     return toast('Este leitor já possui um empréstimo ativo para este mesmo livro!', 'error')
   }
 
-  const role = String(reader.role || reader.type || 'student').toLowerCase()
+  const maxLoanDays = getMaxLoanDaysForReader(reader)
+  if (!Number.isInteger(days) || days < 1 || days > maxLoanDays) {
+    updateLoanDaysLimit(reader)
+    return toast(`O prazo deve ser entre 1 e ${maxLoanDays} dias para este perfil.`, 'error')
+  }
+
   loading(button, true, 'Registrando…')
 
   try {
@@ -627,7 +683,7 @@ async function registerLoan() {
 
       const availableCopies = Number(bookSnap.data().available || 0)
       const due = new Date()
-      const effectiveDays = role === 'teacher' ? Number(config.teacherLoanDays || days || 21) : Number(days || 7)
+      const effectiveDays = days
       due.setDate(due.getDate() + effectiveDays)
 
       tx.update(bookRef, {
@@ -659,6 +715,7 @@ async function registerLoan() {
     if ($('#bookCodeInput')) $('#bookCodeInput').value = ''
     if ($('#readerInput')) $('#readerInput').value = ''
     if ($('#loanReaderIdInput')) $('#loanReaderIdInput').value = ''
+    updateLoanDaysLimit(null, true)
     if ($('#readerSuggestions')) $('#readerSuggestions').hidden = true
     if ($('#bookCodeInput')) $('#bookCodeInput').focus()
     toast('Empréstimo registrado.')
@@ -701,6 +758,12 @@ async function renewLoan(id) {
   if (!loan) return
   const select = document.querySelector?.(`[data-renew-days="${id}"]`)
   const days = Number(select?.value || loan.days || 7)
+  const reader = state.readers.find((item) => item.id === loan.readerId)
+  const maximum = getMaxLoanDaysForReader(reader)
+  if (!Number.isInteger(days) || days < 1 || days > maximum) {
+    toast(`A renovação deve ser entre 1 e ${maximum} dias para este perfil.`, 'error')
+    return
+  }
   try {
     const due = date(loan.dueAt) ? new Date(date(loan.dueAt)) : new Date()
     due.setDate(due.getDate() + days)
@@ -960,7 +1023,7 @@ function recordsToExportRows(records = [], excludedFields = []) {
 async function schoolBackupTables() {
   if (!state.profile || state.profile.role !== 'admin' || !config.currentSchoolId) throw new Error('Acesse com um administrador vinculado a uma escola.')
 
-  const collectionNames = ['reservations', 'counters', 'audit_logs', 'email_logs']
+  const collectionNames = ['readers', 'reservations', 'counters', 'audit_logs', 'email_logs']
   const [schoolSnapshot, ...snapshots] = await Promise.all([
     getDoc(doc(db, 'schools', config.currentSchoolId)),
     ...collectionNames.map((name) => getDocs(query(collection(db, name), where('schoolId', '==', config.currentSchoolId))))
@@ -974,7 +1037,7 @@ async function schoolBackupTables() {
   return [
     ['Acervo', bookExportRows()],
     ['Emprestimos', recordsToExportRows(state.loans)],
-    ['Leitores', recordsToExportRows(state.readers)],
+    ['Leitores', recordsToExportRows(collectionRecords.readers)],
     ['Categorias', recordsToExportRows(state.categories)],
     ['Reservas', recordsToExportRows(collectionRecords.reservations)],
     ['Contadores', recordsToExportRows(collectionRecords.counters)],
@@ -1794,8 +1857,10 @@ function renderLoans() {
 
   tbody.innerHTML = list.length ? list.map((l) => {
     const selectedDays = Number(l.days || 7)
-    const renewOptions = [7, 14, 21, 30].map((days) => `<option value="${days}" ${days === selectedDays ? 'selected' : ''}>${days} dias</option>`).join('')
-    return `<tr><td>${esc(l.bookTitle)}<br><small>${esc(l.bookCode)}</small></td><td>${esc(l.readerName)}</td><td><div>${formatDate(l.dueAt)}</div><small>Prazo: ${selectedDays} dias</small></td><td><span class="badge ${overdue(l) ? 'borrowed' : 'available'}">${overdue(l) ? 'Em atraso' : 'Em dia'}</span></td><td><div class="action-row"><select class="renew-days" data-renew-days="${l.id}" aria-label="Dias para renovar">${renewOptions}</select><button class="small-btn primary" data-return="${l.id}" type="button">Devolver</button><button class="small-btn warning" data-renew="${l.id}" type="button">Renovar</button><button class="small-btn danger" data-notify="${l.id}" type="button">Notificar</button></div></td></tr>`
+    const reader = state.readers.find((item) => item.id === l.readerId)
+    const maximum = getMaxLoanDaysForReader(reader)
+    const renewalDays = Math.min(Math.max(1, selectedDays), maximum)
+    return `<tr><td>${esc(l.bookTitle)}<br><small>${esc(l.bookCode)}</small></td><td>${esc(l.readerName)}</td><td><div>${formatDate(l.dueAt)}</div><small>Prazo: ${selectedDays} dias</small></td><td><span class="badge ${overdue(l) ? 'borrowed' : 'available'}">${overdue(l) ? 'Em atraso' : 'Em dia'}</span></td><td><div class="action-row"><input class="renew-days" type="number" min="1" max="${maximum}" value="${renewalDays}" data-renew-days="${esc(l.id)}" aria-label="Dias para renovar (máximo ${maximum})"><button class="small-btn primary" data-return="${esc(l.id)}" type="button">Devolver</button><button class="small-btn warning" data-renew="${esc(l.id)}" type="button">Renovar</button><button class="small-btn danger" data-notify="${esc(l.id)}" type="button">Notificar</button></div></td></tr>`
   }).join('') : '<tr><td colspan="5" class="text-center">Nenhum empréstimo corresponde à busca e aos filtros.</td></tr>'
 
   $$('[data-return]').forEach((b) => b.onclick = () => returnLoan(b.dataset.return))
@@ -2026,6 +2091,7 @@ function setup() {
   if ($('#readerInput')) {
     $('#readerInput').oninput = () => {
       if ($('#loanReaderIdInput')) $('#loanReaderIdInput').value = ''
+      updateLoanDaysLimit(null, true)
       renderReaderSelector()
     }
     $('#readerInput').onkeydown = (event) => {
@@ -2066,6 +2132,18 @@ function setup() {
       button.setAttribute('aria-label', showing ? 'Ocultar senha' : 'Mostrar senha')
     }
   }
+  if ($('#toggleLocalPasswordBtn')) {
+    $('#toggleLocalPasswordBtn').onclick = () => {
+      const input = $('#localLoginPasswordInput')
+      const button = $('#toggleLocalPasswordBtn')
+      if (!input || !button) return
+
+      const showing = input.type === 'password'
+      input.type = showing ? 'text' : 'password'
+      button.setAttribute('aria-pressed', String(showing))
+      button.setAttribute('aria-label', showing ? 'Ocultar senha' : 'Mostrar senha')
+    }
+  }
   if ($('#bookCodeInput')) $('#bookCodeInput').onkeydown = handleBookCodeEntry
   if ($('#addLocalAccountBtn')) $('#addLocalAccountBtn').onclick = () => addLocalAccountRow()
   if ($('#openCredeLoginBtn')) $('#openCredeLoginBtn').onclick = () => {
@@ -2080,6 +2158,7 @@ function setup() {
   if ($('#schoolSettingsForm')) $('#schoolSettingsForm').onsubmit = saveSchoolSettings
   if ($('#readerTypeInput')) $('#readerTypeInput').onchange = updateReaderFields
   if ($('#registerLoanBtn')) $('#registerLoanBtn').onclick = registerLoan
+  updateLoanDaysLimit(null)
   if ($('#scanBtn')) $('#scanBtn').onclick = openQrScanner
 
   if ($('#openBookModalBtn')) $('#openBookModalBtn').onclick = () => { resetBookForm(); modal('bookFormModal', true) }
@@ -2088,7 +2167,6 @@ function setup() {
     if ($('#categoryForm')) $('#categoryForm').reset()
     modal('categoryModal', true)
   }
-  if ($('#openCategoryModalBtn')) $('#openCategoryModalBtn').onclick = openCategoryModal
   if ($('#openCategoryFromBookBtn')) $('#openCategoryFromBookBtn').onclick = openCategoryModal
   if ($('#openBookLabelsBtn')) $('#openBookLabelsBtn').onclick = () => {
     if ($('#labelBookSearchInput')) $('#labelBookSearchInput').value = ''
@@ -2345,9 +2423,14 @@ async function saveSchoolSettings(event) {
 
   const maxBooksStudent = Number($('#maxBooksStudentInput')?.value || config.maxBooksStudent || 2)
   const maxBooksTeacher = Number($('#maxBooksTeacherInput')?.value || config.maxBooksTeacher || 35)
-  const teacherLoanDays = Number(config.teacherLoanDays || 21)
+  const studentLoanDays = Number($('#studentLoanDaysInput')?.value || 7)
+  const teacherLoanDays = Number($('#teacherLoanDaysInput')?.value || 21)
 
   if (!schoolName) return toast('Informe o nome da escola para continuar.', 'error')
+  if (!Number.isInteger(studentLoanDays) || studentLoanDays < 1 || studentLoanDays > 180 ||
+      !Number.isInteger(teacherLoanDays) || teacherLoanDays < 1 || teacherLoanDays > 180) {
+    return toast('Os prazos máximos devem ser números inteiros entre 1 e 180 dias.', 'error')
+  }
 
   try {
     const schoolRef = doc(db, 'schools', config.currentSchoolId)
@@ -2359,6 +2442,7 @@ async function saveSchoolSettings(event) {
       coordinationEmail,
       maxBooksStudent,
       maxBooksTeacher,
+      studentLoanDays,
       teacherLoanDays,
       updatedAt: serverTimestamp()
     }, { merge: true })
@@ -2367,9 +2451,12 @@ async function saveSchoolSettings(event) {
     config.coordinationEmail = coordinationEmail
     config.maxBooksStudent = maxBooksStudent
     config.maxBooksTeacher = maxBooksTeacher
+    config.studentLoanDays = studentLoanDays
     config.teacherLoanDays = teacherLoanDays
+    const selectedReader = state.readers.find((reader) => reader.id === $('#loanReaderIdInput')?.value)
+    updateLoanDaysLimit(selectedReader)
     syncSchoolSettingsForm(config)
-    await logAudit(schoolSetupRequired ? 'school_initialized' : 'school_settings_updated', { schoolId: config.currentSchoolId, schoolName, coordinationEmail, maxBooksStudent, maxBooksTeacher, teacherLoanDays }, state.user?.uid || null)
+    await logAudit(schoolSetupRequired ? 'school_initialized' : 'school_settings_updated', { schoolId: config.currentSchoolId, schoolName, coordinationEmail, maxBooksStudent, maxBooksTeacher, studentLoanDays, teacherLoanDays }, state.user?.uid || null)
 
     if (schoolSetupRequired) {
       if (!await loadSchoolData(config.currentSchoolId)) throw new Error('As configurações da escola não puderam ser recarregadas.')
@@ -2395,12 +2482,16 @@ function syncSchoolSettingsForm(data = config) {
   const coordinationEmailInput = $('#coordinationEmailInput')
   const maxBooksStudentInput = $('#maxBooksStudentInput')
   const maxBooksTeacherInput = $('#maxBooksTeacherInput')
+  const studentLoanDaysInput = $('#studentLoanDaysInput')
+  const teacherLoanDaysInput = $('#teacherLoanDaysInput')
   const settings = data || {}
 
   if (schoolNameInput) schoolNameInput.value = settings.schoolName || ''
   if (coordinationEmailInput) coordinationEmailInput.value = settings.coordinationEmail || ''
   if (maxBooksStudentInput) maxBooksStudentInput.value = String(settings.maxBooksStudent ?? 2)
   if (maxBooksTeacherInput) maxBooksTeacherInput.value = String(settings.maxBooksTeacher ?? 35)
+  if (studentLoanDaysInput) studentLoanDaysInput.value = String(settings.studentLoanDays ?? 7)
+  if (teacherLoanDaysInput) teacherLoanDaysInput.value = String(settings.teacherLoanDays ?? 21)
 }
 
 /* Load school settings after local email authorization. */
@@ -2415,6 +2506,7 @@ async function loadSchoolData(schoolId = config.currentSchoolId) {
     config.coordinationDays = 7
     config.maxBooksStudent = 2
     config.maxBooksTeacher = 35
+    config.studentLoanDays = 7
     config.teacherLoanDays = 21
     const school = await getDoc(doc(db, 'schools', config.currentSchoolId))
     if (school.exists()) {
@@ -2425,6 +2517,7 @@ async function loadSchoolData(schoolId = config.currentSchoolId) {
       config.coordinationDays = Number(data.coordinationDays ?? data.coordinationAfterDays ?? 7)
       config.maxBooksStudent = Number(data.maxBooksStudent ?? 2)
       config.maxBooksTeacher = Number(data.maxBooksTeacher ?? 35)
+      config.studentLoanDays = Number(data.studentLoanDays ?? 7)
       config.teacherLoanDays = Number(data.teacherLoanDays ?? 21)
       config.smtp = {
         host: String(data.smtp?.host || ''),
