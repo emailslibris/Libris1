@@ -321,6 +321,73 @@ function renderDashboard() {
   renderBars($('#courseChart'), count(active, (l) => l.readerCourse || 'Não informado').slice(0, 5))
   const top = count(state.loans, (l) => l.readerName || 'Leitor').slice(0, 5)
   if ($('#readerChart')) $('#readerChart').innerHTML = top.length ? top.map((x) => `<div class="list-item"><strong>${esc(x.label)}</strong><span>${x.value} empréstimos</span></div>`).join('') : '<p class="empty-state">Sem dados.</p>'
+
+  const currentYear = new Date().getFullYear()
+  const monthCounts = Array.from({ length: 12 }, (_, index) => {
+    const monthDate = new Date(currentYear, index, 1)
+    return {
+      key: `${monthDate.getFullYear()}-${monthDate.getMonth()}`,
+      label: monthDate.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', ''),
+      value: 0
+    }
+  })
+  const monthCountByKey = new Map(monthCounts.map((month) => [month.key, month]))
+  state.loans.forEach((loan) => {
+    const createdAt = date(loan.createdAt)
+    if (!(createdAt instanceof Date) || Number.isNaN(createdAt.getTime())) return
+    const month = monthCountByKey.get(`${createdAt.getFullYear()}-${createdAt.getMonth()}`)
+    if (month) month.value += 1
+  })
+  renderBars($('#monthlyLoanChart'), monthCounts.some((month) => month.value > 0) ? monthCounts : [])
+
+  const readerTypeCounts = new Map([
+    ['Alunos', 0],
+    ['Professores', 0],
+    ['Outros', 0]
+  ])
+  state.readers.forEach((reader) => {
+    const type = String(reader.type || reader.role || '').toLocaleLowerCase('pt-BR')
+    const label = isStudentReader(reader)
+      ? 'Alunos'
+      : type === 'professor' || type === 'teacher'
+        ? 'Professores'
+        : 'Outros'
+    readerTypeCounts.set(label, readerTypeCounts.get(label) + 1)
+  })
+  const readerTypeSegments = [...readerTypeCounts].map(([label, value], index) => ({
+    label,
+    value,
+    color: ['var(--success)', 'var(--warning)', 'var(--primary)'][index]
+  }))
+  const readerTypeTotal = readerTypeSegments.reduce((sum, segment) => sum + segment.value, 0)
+  let readerTypeDegrees = 0
+  const readerTypeGradient = readerTypeTotal
+    ? readerTypeSegments.map((segment, index) => {
+      const start = readerTypeDegrees
+      readerTypeDegrees += index === readerTypeSegments.length - 1
+        ? 360 - readerTypeDegrees
+        : segment.value / readerTypeTotal * 360
+      return `${segment.color} ${start}deg ${readerTypeDegrees}deg`
+    }).join(',')
+    : 'var(--panel-muted) 0deg 360deg'
+  if ($('#readerTypeDonut')) {
+    $('#readerTypeDonut').innerHTML = `<div class="donut" style="background:conic-gradient(${readerTypeGradient})"><div class="donut-center">${readerTypeTotal}</div></div>`
+  }
+  if ($('#readerTypeLegend')) {
+    $('#readerTypeLegend').innerHTML = readerTypeSegments.map((segment, index) => `<div class="legend-item"><span class="legend-dot ${['success', 'warning', 'reader-other'][index]}"></span>${segment.label}: ${segment.value}</div>`).join('')
+  }
+
+  renderBars(
+    $('#topBooksChart'),
+    count(state.loans, (loan) => loan.bookTitle || loan.bookCode || 'Livro sem título').slice(0, 5)
+  )
+
+  const readersById = new Map(state.readers.map((reader) => [reader.id, reader]))
+  const activeLoansByReaderType = count(active, (loan) => {
+    const reader = readersById.get(loan.readerId)
+    return reader && isStudentReader(reader) ? 'Alunos' : 'Professores e outros'
+  })
+  renderBars($('#loansByReaderTypeChart'), activeLoansByReaderType)
 }
 
 /* -------------------------
@@ -950,34 +1017,6 @@ async function saveExportBlob(blob, filename, filterName, extensions) {
 
   await writeFile(path, new Uint8Array(await blob.arrayBuffer()))
   return true
-}
-
-async function downloadBookCsvTemplate() {
-  toast('Preparando o modelo CSV...')
-  const headers = [
-    'Código',
-    'Categoria',
-    'Título',
-    'Autor',
-    'Editora',
-    'Ano',
-    'Localização',
-    'Disponíveis',
-    'Total',
-    'Tombamento',
-    'Sinopse',
-    'URL da capa'
-  ]
-
-  const csv = `\uFEFF${csvFromRows([headers])}`
-  const file = new Blob([csv], { type: 'text/csv;charset=utf-8' })
-  try {
-    if (await saveExportBlob(file, 'Libris_Modelo_Livros.csv', 'Arquivo CSV', ['csv'])) {
-      toast('Modelo CSV salvo com sucesso.')
-    }
-  } catch (err) {
-    error(err, 'Não foi possível salvar o modelo CSV.')
-  }
 }
 
 async function exportCsv() {
@@ -1725,9 +1764,11 @@ function renderLoans() {
       ? role === 'student' || role === 'aluno'
       : state.loanFilter === 'teacher'
         ? role === 'teacher' || role === 'professor'
-        : state.loanFilter === 'overdue'
-          ? overdue(l)
-          : true
+        : state.loanFilter === 'other'
+          ? !isStudentReader(reader) && role !== 'teacher' && role !== 'professor'
+          : state.loanFilter === 'overdue'
+            ? overdue(l)
+            : true
     if (!matchesFilter) return false
 
     const searchFields = [
@@ -1953,15 +1994,19 @@ function focusBookCodeInput() {
 function setAdminTab(tabName) {
   $$('.tab-btn').forEach((button) => {
     button.classList.toggle('is-active', button.dataset.tab === tabName)
+    button.setAttribute('aria-pressed', String(button.dataset.tab === tabName))
+    if (button.getAttribute('role') === 'tab') {
+      button.setAttribute('aria-selected', String(button.dataset.tab === tabName))
+    }
   })
   $$('.tab-panel').forEach((panel) => {
     panel.classList.toggle('is-active', panel.dataset.panel === tabName)
   })
 
   const isRootTab = tabName === 'checkout'
-  $('#adminView')?.classList.toggle('is-subview', !isRootTab)
+  $('#adminView')?.classList.remove('is-subview')
   const backButton = $('#backToLoansBtn')
-  if (backButton) backButton.hidden = isRootTab
+  if (backButton) backButton.hidden = true
   if (isRootTab) focusBookCodeInput()
 }
 
@@ -1973,7 +2018,6 @@ function setup() {
   $$('.tab-btn').forEach((b) => b.onclick = () => {
     setAdminTab(b.dataset.tab)
   })
-  if ($('#backToLoansBtn')) $('#backToLoansBtn').onclick = () => setAdminTab('checkout')
 
   if ($('#acervoSearchInput')) $('#acervoSearchInput').oninput = (x) => { state.acervoQuery = x.target.value; renderBooks() }
   if ($('#readerSearchInput')) $('#readerSearchInput').oninput = (x) => { state.readerQuery = x.target.value; renderReaders() }
@@ -2023,7 +2067,6 @@ function setup() {
     }
   }
   if ($('#bookCodeInput')) $('#bookCodeInput').onkeydown = handleBookCodeEntry
-  if ($('#downloadBookCsvTemplateBtn')) $('#downloadBookCsvTemplateBtn').onclick = downloadBookCsvTemplate
   if ($('#addLocalAccountBtn')) $('#addLocalAccountBtn').onclick = () => addLocalAccountRow()
   if ($('#openCredeLoginBtn')) $('#openCredeLoginBtn').onclick = () => {
     if ($('#loginForm')) $('#loginForm').hidden = true
@@ -2081,6 +2124,18 @@ function setup() {
     if ($('#settingsModalTitle')) $('#settingsModalTitle').textContent = 'Configurações da escola'
     modal('settingsModal', true)
   }
+  if ($('#openAboutBtn')) $('#openAboutBtn').onclick = () => modal('aboutModal', true)
+  if ($('#openHelpBtn')) $('#openHelpBtn').onclick = () => modal('helpModal', true)
+  $$('.chart-info-btn').forEach((button) => {
+    button.onclick = () => {
+      const title = $('#chartInfoTitle')
+      const description = $('#chartInfoDescription')
+      if (!title || !description) return
+      title.textContent = button.dataset.chartInfoTitle || 'Informações do gráfico'
+      description.textContent = button.dataset.chartInfo || ''
+      modal('chartInfoModal', true)
+    }
+  })
 
   $$('.modal [data-close]').forEach((b) => b.onclick = () => {
     if (b.dataset.close === 'loginModal' && state.profile?.role !== 'admin') return
@@ -2287,12 +2342,10 @@ async function saveSchoolSettings(event) {
 
   const schoolName = $('#schoolNameInput')?.value.trim() || ''
   const coordinationEmail = $('#coordinationEmailInput')?.value.trim() || ''
-  const reminderDays = Number($('#reminderDaysInput')?.value || 1)
-  const coordinationDays = Number($('#coordinationDaysInput')?.value || 7)
 
   const maxBooksStudent = Number($('#maxBooksStudentInput')?.value || config.maxBooksStudent || 2)
   const maxBooksTeacher = Number($('#maxBooksTeacherInput')?.value || config.maxBooksTeacher || 35)
-  const teacherLoanDays = Number($('#teacherLoanDaysInput')?.value || config.teacherLoanDays || 21)
+  const teacherLoanDays = Number(config.teacherLoanDays || 21)
 
   if (!schoolName) return toast('Informe o nome da escola para continuar.', 'error')
 
@@ -2304,8 +2357,6 @@ async function saveSchoolSettings(event) {
       ...initialFields,
       name: schoolName,
       coordinationEmail,
-      reminderDays,
-      coordinationDays,
       maxBooksStudent,
       maxBooksTeacher,
       teacherLoanDays,
@@ -2314,13 +2365,11 @@ async function saveSchoolSettings(event) {
 
     config.schoolName = schoolName
     config.coordinationEmail = coordinationEmail
-    config.reminderDays = reminderDays
-    config.coordinationDays = coordinationDays
     config.maxBooksStudent = maxBooksStudent
     config.maxBooksTeacher = maxBooksTeacher
     config.teacherLoanDays = teacherLoanDays
     syncSchoolSettingsForm(config)
-    await logAudit(schoolSetupRequired ? 'school_initialized' : 'school_settings_updated', { schoolId: config.currentSchoolId, schoolName, coordinationEmail, reminderDays, coordinationDays, maxBooksStudent, maxBooksTeacher, teacherLoanDays }, state.user?.uid || null)
+    await logAudit(schoolSetupRequired ? 'school_initialized' : 'school_settings_updated', { schoolId: config.currentSchoolId, schoolName, coordinationEmail, maxBooksStudent, maxBooksTeacher, teacherLoanDays }, state.user?.uid || null)
 
     if (schoolSetupRequired) {
       if (!await loadSchoolData(config.currentSchoolId)) throw new Error('As configurações da escola não puderam ser recarregadas.')
@@ -2344,20 +2393,14 @@ async function saveSchoolSettings(event) {
 function syncSchoolSettingsForm(data = config) {
   const schoolNameInput = $('#schoolNameInput')
   const coordinationEmailInput = $('#coordinationEmailInput')
-  const reminderDaysInput = $('#reminderDaysInput')
-  const coordinationDaysInput = $('#coordinationDaysInput')
   const maxBooksStudentInput = $('#maxBooksStudentInput')
   const maxBooksTeacherInput = $('#maxBooksTeacherInput')
-  const teacherLoanDaysInput = $('#teacherLoanDaysInput')
   const settings = data || {}
 
   if (schoolNameInput) schoolNameInput.value = settings.schoolName || ''
   if (coordinationEmailInput) coordinationEmailInput.value = settings.coordinationEmail || ''
-  if (reminderDaysInput) reminderDaysInput.value = String(settings.reminderDays ?? 1)
-  if (coordinationDaysInput) coordinationDaysInput.value = String(settings.coordinationDays ?? 7)
   if (maxBooksStudentInput) maxBooksStudentInput.value = String(settings.maxBooksStudent ?? 2)
   if (maxBooksTeacherInput) maxBooksTeacherInput.value = String(settings.maxBooksTeacher ?? 35)
-  if (teacherLoanDaysInput) teacherLoanDaysInput.value = String(settings.teacherLoanDays ?? 21)
 }
 
 /* Load school settings after local email authorization. */

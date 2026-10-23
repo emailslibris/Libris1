@@ -34,12 +34,80 @@
 
         <div class="topbar-actions">
           <div id="schoolName" class="eyebrow school-label">Biblioteca escolar</div>
+          <button class="icon-btn" id="openAboutBtn" type="button" aria-label="Sobre o Libris" title="Sobre">
+            <span aria-hidden="true">ⓘ</span>
+          </button>
+          <button class="icon-btn" id="openHelpBtn" type="button" aria-label="Ajuda do Libris" title="Ajuda">
+            <span aria-hidden="true">?</span>
+          </button>
           <button class="icon-btn" id="openSettingsBtn" type="button" aria-label="Abrir configurações" title="Configurações" hidden>
             <span aria-hidden="true">⚙</span>
           </button>
           <button class="btn btn-secondary" id="logoutBtn" type="button" hidden>Sair</button>
         </div>
       </header>
+
+      <div class="modal hidden" id="aboutModal" aria-hidden="true">
+        <div class="modal-backdrop" data-close="aboutModal"></div>
+        <section class="modal-card small" role="dialog" aria-modal="true" aria-labelledby="aboutModalTitle">
+          <button class="modal-close" type="button" data-close="aboutModal" aria-label="Fechar">×</button>
+          <h3 id="aboutModalTitle">Sobre o Libris</h3>
+          <p class="modal-description">Sistema de gestão para bibliotecas escolares, versão 1.11.0.</p>
+          <dl class="about-details">
+            <div><dt>Desenvolvimento</dt><dd>Vinicius e Alyssa</dd></div>
+            <div><dt>Tecnologias</dt><dd>HTML, CSS, JavaScript e Rust (Tauri)</dd></div>
+            <div><dt>Armazenamento</dt><dd>IndexedDB local, com dados separados por escola</dd></div>
+            <div><dt>Uso offline</dt><dd>As operações da biblioteca são armazenadas localmente neste dispositivo.</dd></div>
+            <div><dt>E-mail</dt><dd>Envio manual por SMTP no aplicativo desktop, quando configurado.</dd></div>
+          </dl>
+        </section>
+      </div>
+
+      <div class="modal hidden" id="helpModal" aria-hidden="true">
+        <div class="modal-backdrop" data-close="helpModal"></div>
+        <section class="modal-card small help-modal" role="dialog" aria-modal="true" aria-labelledby="helpModalTitle">
+          <button class="modal-close" type="button" data-close="helpModal" aria-label="Fechar">×</button>
+          <h3 id="helpModalTitle">Ajuda — perguntas frequentes</h3>
+          <details class="help-item">
+            <summary>Como cadastro um livro?</summary>
+            <p>Abra a aba Acervo, crie uma categoria se necessário e selecione “Adicionar Novo Livro”.</p>
+          </details>
+          <details class="help-item">
+            <summary>Como registro um empréstimo?</summary>
+            <p>Na aba Empréstimos, informe ou escaneie o código do livro, selecione o leitor, escolha o prazo e clique em “Registrar empréstimo”.</p>
+          </details>
+          <details class="help-item">
+            <summary>Posso usar um leitor de código de barras?</summary>
+            <p>Sim. Leitores USB que funcionam como teclado podem inserir o código no campo ID do livro. A câmera QR também pode ser usada quando disponível.</p>
+          </details>
+          <details class="help-item">
+            <summary>Como registro a devolução ou renovação?</summary>
+            <p>Na lista de empréstimos ativos, use as ações “Devolver” ou “Renovar” na linha correspondente.</p>
+          </details>
+          <details class="help-item">
+            <summary>Onde vejo empréstimos atrasados?</summary>
+            <p>Use o seletor “Filtrar por” na tabela de empréstimos ativos e escolha “Atrasados”.</p>
+          </details>
+          <details class="help-item">
+            <summary>Como faço backup?</summary>
+            <p>Use “Exportar” e escolha o backup completo. Guarde o arquivo em local seguro e faça exportações periódicas.</p>
+          </details>
+          <details class="help-item">
+            <summary>Como envio um aviso por e-mail?</summary>
+            <p>O envio é manual e está disponível no aplicativo desktop após a configuração do SMTP pela administração. O app web legado não envia e-mails.</p>
+          </details>
+          <p class="field-help">Se precisar de acesso ou suporte, procure a administração responsável pela biblioteca ou pela CREDE.</p>
+        </section>
+      </div>
+
+      <div class="modal hidden" id="chartInfoModal" aria-hidden="true">
+        <div class="modal-backdrop" data-close="chartInfoModal"></div>
+        <section class="modal-card small" role="dialog" aria-modal="true" aria-labelledby="chartInfoTitle">
+          <button class="modal-close" type="button" data-close="chartInfoModal" aria-label="Fechar">×</button>
+          <h3 id="chartInfoTitle"></h3>
+          <p id="chartInfoDescription" class="modal-description"></p>
+        </section>
+      </div>
 
       <main class="main-content">
         <section id="librisAdminView" class="view" hidden>
@@ -104,6 +172,8 @@
         </section>
 
         <section id="adminView" class="view is-active" hidden>
+          <div class="admin-home-layout">
+            <div class="admin-home-content">
           <div class="admin-header">
             <div>
               <p class="eyebrow">Menu Administrativo</p>
@@ -121,6 +191,7 @@
             <div class="panel chart-panel">
               <div class="panel-head">
                 <h3>Top 5 Gêneros</h3>
+                <button class="chart-info-btn" type="button" data-chart-info-title="Top 5 Gêneros" data-chart-info="Mostra as cinco categorias com mais livros cadastrados no acervo." aria-label="Informações sobre Top 5 Gêneros" title="Sobre este gráfico">i</button>
               </div>
               <div class="bar-chart compact" id="genreChart"></div>
             </div>
@@ -128,6 +199,7 @@
             <div class="panel chart-panel">
               <div class="panel-head">
                 <h3>Status do Acervo</h3>
+                <button class="chart-info-btn" type="button" data-chart-info-title="Status do Acervo" data-chart-info="Compara a quantidade de exemplares disponíveis com a quantidade emprestada." aria-label="Informações sobre Status do Acervo" title="Sobre este gráfico">i</button>
               </div>
               <div class="donut-wrap" id="statusDonut"></div>
               <div class="status-legend" id="statusLegend"></div>
@@ -136,6 +208,7 @@
             <div class="panel chart-panel">
               <div class="panel-head">
                 <h3>Empréstimos por Curso/Turma</h3>
+                <button class="chart-info-btn" type="button" data-chart-info-title="Empréstimos por Curso/Turma" data-chart-info="Agrupa os empréstimos ativos pelo curso ou turma dos leitores." aria-label="Informações sobre Empréstimos por Curso/Turma" title="Sobre este gráfico">i</button>
               </div>
               <div class="bar-chart" id="courseChart"></div>
             </div>
@@ -143,8 +216,42 @@
             <div class="panel chart-panel">
               <div class="panel-head">
                 <h3>Top Leitores</h3>
+                <button class="chart-info-btn" type="button" data-chart-info-title="Top Leitores" data-chart-info="Lista os leitores com mais empréstimos registrados." aria-label="Informações sobre Top Leitores" title="Sobre este gráfico">i</button>
               </div>
               <div class="list-chart" id="readerChart"></div>
+            </div>
+
+            <div class="panel chart-panel">
+              <div class="panel-head">
+                <h3>Empréstimos por mês</h3>
+                <button class="chart-info-btn" type="button" data-chart-info-title="Empréstimos por mês" data-chart-info="Conta os empréstimos registrados em cada mês do ano atual, pela data de criação do empréstimo." aria-label="Informações sobre Empréstimos por mês" title="Sobre este gráfico">i</button>
+              </div>
+              <div class="bar-chart" id="monthlyLoanChart"></div>
+            </div>
+
+            <div class="panel chart-panel">
+              <div class="panel-head">
+                <h3>Perfil dos leitores</h3>
+                <button class="chart-info-btn" type="button" data-chart-info-title="Perfil dos leitores" data-chart-info="Mostra a quantidade de leitores cadastrados em cada perfil: alunos, professores e outros." aria-label="Informações sobre Perfil dos leitores" title="Sobre este gráfico">i</button>
+              </div>
+              <div class="donut-wrap" id="readerTypeDonut"></div>
+              <div class="status-legend" id="readerTypeLegend"></div>
+            </div>
+
+            <div class="panel chart-panel">
+              <div class="panel-head">
+                <h3>Livros mais emprestados</h3>
+                <button class="chart-info-btn" type="button" data-chart-info-title="Livros mais emprestados" data-chart-info="Lista os cinco títulos com mais registros de empréstimo." aria-label="Informações sobre Livros mais emprestados" title="Sobre este gráfico">i</button>
+              </div>
+              <div class="bar-chart" id="topBooksChart"></div>
+            </div>
+
+            <div class="panel chart-panel">
+              <div class="panel-head">
+                <h3>Empréstimos por perfil</h3>
+                <button class="chart-info-btn" type="button" data-chart-info-title="Empréstimos por perfil" data-chart-info="Compara os empréstimos ativos de alunos com os de professores e outros leitores." aria-label="Informações sobre Empréstimos por perfil" title="Sobre este gráfico">i</button>
+              </div>
+              <div class="bar-chart" id="loansByReaderTypeChart"></div>
             </div>
           </div>
 
@@ -152,12 +259,11 @@
             <div class="admin-back-row">
               <button class="btn btn-secondary admin-back-button" id="backToLoansBtn" type="button" hidden>⬅ Voltar</button>
             </div>
-            <div class="tab-buttons">
-              <button class="tab-btn is-active" data-tab="checkout" type="button">Empréstimos</button>
-              <button class="tab-btn" data-tab="acervo" type="button">Acervo</button>
-              <button class="tab-btn" data-tab="leitores" type="button">Leitores</button>
+            <div class="tab-buttons" role="tablist" aria-label="Áreas da biblioteca">
+              <button class="tab-btn is-active" data-tab="checkout" type="button" role="tab" aria-selected="true" aria-pressed="true">Empréstimos</button>
+              <button class="tab-btn" data-tab="acervo" type="button" role="tab" aria-selected="false" aria-pressed="false">Acervo</button>
+              <button class="tab-btn" data-tab="leitores" type="button" role="tab" aria-selected="false" aria-pressed="false">Leitores</button>
             </div>
-
             <div class="tab-panel is-active" data-panel="checkout">
               <div class="checkout-form panel">
                 <h3>Registrar empréstimo</h3>
@@ -171,7 +277,7 @@
                         placeholder="Digite ou escaneie (ex.: LI-0002)"
                         autocomplete="off"
                       />
-                      <button type="button" class="btn btn-ghost" id="scanBtn">Usar câmera</button>
+                      <button type="button" class="btn btn-ghost" id="scanBtn" aria-label="Usar câmera para escanear o código" title="Usar câmera">📷</button>
                     </div>
                   </label>
                   <label>
@@ -203,11 +309,12 @@
                       <input id="loanSearchInput" type="search" placeholder="Livro, código, leitor ou matrícula" />
                     </label>
                     <label class="loan-status-filter">
-                      <span>Filtrar por</span>
+                      <span><span aria-hidden="true">🔍</span> Filtrar por</span>
                       <select id="loanFilterSelect" class="input-select">
                         <option value="all">Todos os empréstimos</option>
                         <option value="student">Alunos</option>
                         <option value="teacher">Professores</option>
+                        <option value="other">Outros</option>
                         <option value="overdue">Atrasados</option>
                       </select>
                     </label>
@@ -317,6 +424,8 @@
             </div>
 
           </div>
+            </div>
+          </div>
         </section>
       </main>
     </div>
@@ -401,24 +510,12 @@
             <input id="coordinationEmailInput" type="email" placeholder="coordenacao@escola.edu.br" />
           </label>
           <label>
-            <span>Dias para lembrete</span>
-            <input id="reminderDaysInput" type="number" min="1" max="30" value="1" />
-          </label>
-          <label>
-            <span>Dias para avisar a coordenação</span>
-            <input id="coordinationDaysInput" type="number" min="1" max="90" value="7" />
-          </label>
-          <label>
             <span>Limite de livros ativos por aluno</span>
             <input id="maxBooksStudentInput" type="number" min="1" max="20" value="2" />
           </label>
           <label>
             <span>Limite de livros ativos por professor</span>
             <input id="maxBooksTeacherInput" type="number" min="1" max="200" value="35" />
-          </label>
-          <label>
-            <span>Dias de empréstimo para professor</span>
-            <input id="teacherLoanDaysInput" type="number" min="1" max="180" value="21" />
           </label>
           <div class="settings-actions">
             <button class="btn btn-primary" type="submit">Salvar configurações</button>
@@ -477,12 +574,8 @@
         <h3 id="importCsvFileTitle">Importar dados</h3>
         <p class="modal-description">
           Preencha uma linha por livro. O código deve seguir o formato PREFIXO-0001;
-          a categoria deve corresponder ao prefixo. Use ponto e vírgula como separador
-          ou baixe o modelo abaixo.
+          a categoria deve corresponder ao prefixo. Use ponto e vírgula como separador.
         </p>
-        <button class="btn btn-ghost" id="downloadBookCsvTemplateBtn" type="button">
-          Baixar modelo em branco
-        </button>
         <label>
           <span>CSV de livros ou backup completo ZIP</span>
           <input id="importCsvInput" type="file" accept=".csv,.zip,text/csv,application/zip" />
@@ -559,8 +652,10 @@
           </label>
           <div class="book-category-field">
             <span class="field-label">Categoria</span>
-            <button class="btn btn-secondary" id="openCategoryFromBookBtn" type="button">+ Nova Categoria</button>
-            <select id="bookCategoryInput" aria-label="Categoria do livro"></select>
+            <div class="book-category-control">
+              <select id="bookCategoryInput" aria-label="Categoria do livro"></select>
+              <button class="btn btn-secondary book-category-add" id="openCategoryFromBookBtn" type="button" aria-label="Nova categoria" title="Nova categoria">+</button>
+            </div>
           </div>
           <label>
             <span>Ano</span>

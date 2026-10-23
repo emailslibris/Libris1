@@ -136,13 +136,14 @@ a { color: inherit; text-decoration: none; }
 
 /* Dashboard grid & charts */
 .dashboard-grid {
+  grid-area:dashboard;
   display:grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 1rem;
-  margin-bottom: 1rem;
+  grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));
+  gap:0.85rem;
+  margin:0;
 }
-.chart-panel { display:flex; flex-direction:column; gap:0.75rem; min-width:0; min-height:230px; }
-.bar-chart { min-height:140px; padding:0.5rem 0; }
+.chart-panel { display:flex; flex-direction:column; gap:0.65rem; min-width:0; min-height:190px; }
+.bar-chart { min-height:110px; padding:0.35rem 0; }
 .bar-row { display:flex; align-items:center; gap:0.6rem; margin-bottom:0.72rem; min-width:0; }
 .bar-row > span { width:35%; overflow:hidden; color:var(--text); text-overflow:ellipsis; white-space:nowrap; font-size:0.82rem; }
 .bar-row > strong { width:2rem; color:var(--primary-dark); text-align:right; font-size:0.82rem; }
@@ -159,30 +160,73 @@ a { color: inherit; text-decoration: none; }
 .legend-dot { width:0.8rem; height:0.8rem; border-radius:50%; display:inline-block; }
 .legend-dot.success { background:var(--success); }
 .legend-dot.warning { background:var(--warning); }
+.legend-dot.reader-other { background:var(--primary); }
 
 /* Admin tabs */
-.admin-tabs { margin-top:1rem; }
-.admin-tabs { scroll-margin-top:5.5rem; }
-.admin-back-row { margin-bottom:0.75rem; }
-.admin-back-button { min-width:8rem; }
-#adminView.is-subview > .admin-header,
-#adminView.is-subview > #kpiGrid,
-#adminView.is-subview > .dashboard-grid,
-#adminView.is-subview .tab-buttons { display:none; }
-#adminView.is-subview .admin-tabs { margin-top:0; }
-.tab-buttons { display:flex; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.6rem; }
+.admin-tabs { margin-top:1rem; scroll-margin-top:5.5rem; }
+.admin-back-row, .admin-back-button { display:none !important; }
+.tab-buttons { display:flex; gap:0.5rem; flex-wrap:wrap; margin-bottom:0.75rem; }
+.tab-buttons .tab-btn { min-height:42px; padding:0.5rem 0.9rem; border:1px solid transparent; border-radius:0.55rem; background:transparent; color:var(--muted); font-weight:700; }
+.tab-buttons .tab-btn:hover { background:rgba(255,255,255,0.65); color:var(--primary-dark); }
+.tab-buttons .tab-btn.is-active { border-color:var(--line); background:var(--panel); color:var(--primary-dark); box-shadow:0 5px 14px rgba(24,48,34,0.07); }
 .tab-btn { min-height:42px; background:transparent; border:1px solid transparent; padding:0.5rem 0.9rem; border-radius:0.55rem; font-weight:700; color:var(--muted); }
 .tab-btn:hover { background:rgba(255,255,255,0.65); color:var(--primary-dark); }
 .tab-btn.is-active { background:var(--panel); color:var(--primary-dark); border-color:var(--line); box-shadow:0 5px 14px rgba(24,48,34,0.07); }
 .tab-panel { display:none; }
 .tab-panel.is-active { display:block; }
+.tab-panel[data-panel="checkout"] { min-width:0; }
+.tab-panel[data-panel="acervo"],
+.tab-panel[data-panel="leitores"] { min-width:0; }
+.admin-home-layout, .admin-home-content { display:block; }
+.admin-home-content > .admin-header { margin-bottom:1rem; }
+.admin-home-content > #kpiGrid { margin:1rem 0; }
+.chart-panel .panel-head h3 { flex:1; }
+.chart-info-btn {
+  display:grid;
+  flex:0 0 1.65rem;
+  place-items:center;
+  width:1.65rem;
+  min-height:1.65rem;
+  height:1.65rem;
+  padding:0;
+  border:1px solid var(--line);
+  border-radius:50%;
+  background:var(--panel-muted);
+  color:var(--primary-dark);
+  font-size:0.82rem;
+  font-weight:800;
+}
+.chart-info-btn:hover, .chart-info-btn:focus-visible { border-color:var(--primary); background:var(--primary-soft); }
+.about-details { display:grid; gap:0.7rem; margin:1rem 0 0; }
+.about-details > div { padding-bottom:0.6rem; border-bottom:1px solid var(--line); }
+.about-details dt { color:var(--primary-dark); font-size:0.82rem; font-weight:800; }
+.about-details dd { margin:0.15rem 0 0; color:var(--text); }
+.help-modal { display:grid; gap:0.65rem; }
+.help-modal h3 { margin-bottom:0.35rem; }
+.help-item { padding:0.65rem 0.75rem; border:1px solid var(--line); border-radius:0.55rem; background:var(--panel-muted); }
+.help-item summary { color:var(--primary-dark); font-weight:700; cursor:pointer; }
+.help-item p { margin:0.55rem 0 0; color:var(--muted); font-size:0.88rem; }
+.help-modal > .field-help { margin:0.25rem 0 0; }
 
 /* Forms */
 .form-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:0.8rem; align-items:start; }
 label { display:block; font-size:0.9rem; color:var(--muted); }
 .book-category-field { display:grid; gap:0.35rem; align-content:start; }
 .book-category-field .field-label { margin:0; }
-.book-category-field .btn { justify-self:start; }
+.book-category-control { display:flex; align-items:center; gap:0.5rem; }
+.book-category-control select { flex:1; min-width:0; }
+.book-category-add, #scanBtn {
+  flex:0 0 42px;
+  width:42px;
+  min-height:42px;
+  padding:0;
+  font-size:1.25rem;
+}
+.checkout-form #registerLoanBtn { display:block; margin:1rem 0 0 auto; }
+.checkout-form .form-grid { grid-template-columns:minmax(0, 1.1fr) minmax(0, 1.2fr) minmax(8rem, 0.7fr); }
+.checkout-form .form-grid > label { min-width:0; }
+.checkout-form .input-row input { flex:1; min-width:0; }
+.checkout-form .input-row #scanBtn { flex:0 0 42px; }
 .input-row { display:flex; gap:0.5rem; align-items:center; }
 input[type="text"], input[type="email"], input[type="password"], input[type="tel"], input[type="number"], input[type="search"], select, textarea {
   width:100%;
@@ -349,6 +393,11 @@ tr:last-child td { border-bottom: none; }
   .dashboard-grid { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
   .loans-toolbar { align-items:stretch; flex-direction:column; }
   .loan-filters { justify-content:stretch; }
+  .admin-tabs { display:block; }
+  .tab-buttons { gap:0.35rem; }
+  .tab-buttons .tab-btn { flex:1; padding-inline:0.55rem; }
+  .checkout-form .form-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+  .checkout-form .form-grid > label:last-child { grid-column:1 / -1; }
 }
 
 @media (max-width: 520px) {
@@ -358,6 +407,9 @@ tr:last-child td { border-bottom: none; }
   .topbar-actions { gap:0.4rem; }
   .school-label { max-width:34vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:0.72rem; }
   .form-grid { grid-template-columns: 1fr; }
+  .checkout-form .form-grid { grid-template-columns:minmax(0, 1fr); }
+  .checkout-form .form-grid > label:last-child { grid-column:auto; }
+  .checkout-form #registerLoanBtn { width:100%; margin-top:0.8rem; }
   .records-scroll { max-height:58vh; }
   .records-scroll:not(#categoryList) { max-height:42vh; }
   #categoryList.records-scroll { max-height:28vh; }
