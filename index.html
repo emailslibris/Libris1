@@ -129,8 +129,8 @@
           </div>
           <form id="librisConfigForm" class="panel form-grid settings-form">
             <label>
-              <span>Identificador da escola</span>
-              <input id="librisSchoolIdInput" type="text" maxlength="80" pattern="[a-zA-Z0-9_\x2d]+" required />
+              <span>Código INEP da escola</span>
+              <input id="librisSchoolInepInput" type="text" inputmode="numeric" autocomplete="off" maxlength="8" minlength="8" pattern="[0-9]{8}" placeholder="12345678" required />
             </label>
             <label>
               <span>Nome da escola</span>
@@ -196,105 +196,6 @@
           </div>
 
           <div id="kpiGrid" class="kpi-grid"></div>
-
-          <section class="dashboard-export panel" aria-label="Exportar gráficos e relatórios">
-            <div class="dashboard-export-heading">
-              <div>
-                <h3>Exportações do painel</h3>
-                <p>Escolha o período e baixe os gráficos gerais ou o relatório da biblioteca.</p>
-              </div>
-              <label class="dashboard-period">
-                <span>Período</span>
-                <select id="dashboardExportPeriod">
-                  <option value="7">Semanal — últimos 7 dias</option>
-                  <option value="15">Quinzenal — últimos 15 dias</option>
-                  <option value="30" selected>Mensal — últimos 30 dias</option>
-                  <option value="90">Trimestral — últimos 90 dias</option>
-                  <option value="365">Anual — últimos 365 dias</option>
-                  <option value="all">Todo o período</option>
-                </select>
-              </label>
-            </div>
-            <div class="dashboard-export-actions">
-              <div class="dashboard-export-group">
-                <strong>Gráficos gerais</strong>
-                <button class="btn btn-secondary" id="downloadDashboardJpgBtn" type="button">Baixar gráficos JPG</button>
-                <button class="btn btn-secondary" id="downloadDashboardPdfBtn" type="button">Baixar gráficos PDF</button>
-              </div>
-              <div class="dashboard-export-group">
-                <strong>Relatório</strong>
-                <button class="btn btn-primary" id="downloadDashboardReportBtn" type="button">Baixar relatório PDF</button>
-              </div>
-            </div>
-          </section>
-
-          <div class="dashboard-grid">
-            <div class="panel chart-panel">
-              <div class="panel-head">
-                <h3>Top 5 Gêneros</h3>
-                <button class="chart-info-btn" type="button" data-chart-info-title="Top 5 Gêneros" data-chart-info="Mostra as cinco categorias com mais livros cadastrados no acervo." aria-label="Informações sobre Top 5 Gêneros" title="Sobre este gráfico">i</button>
-              </div>
-              <div class="bar-chart compact" id="genreChart"></div>
-            </div>
-
-            <div class="panel chart-panel">
-              <div class="panel-head">
-                <h3>Status do Acervo</h3>
-                <button class="chart-info-btn" type="button" data-chart-info-title="Status do Acervo" data-chart-info="Compara a quantidade de exemplares disponíveis com a quantidade emprestada." aria-label="Informações sobre Status do Acervo" title="Sobre este gráfico">i</button>
-              </div>
-              <div class="donut-wrap" id="statusDonut"></div>
-              <div class="status-legend" id="statusLegend"></div>
-            </div>
-
-            <div class="panel chart-panel">
-              <div class="panel-head">
-                <h3>Empréstimos por Curso/Turma</h3>
-                <button class="chart-info-btn" type="button" data-chart-info-title="Empréstimos por Curso/Turma" data-chart-info="Agrupa os empréstimos ativos pelo curso ou turma dos leitores." aria-label="Informações sobre Empréstimos por Curso/Turma" title="Sobre este gráfico">i</button>
-              </div>
-              <div class="bar-chart" id="courseChart"></div>
-            </div>
-
-            <div class="panel chart-panel">
-              <div class="panel-head">
-                <h3>Top Leitores</h3>
-                <button class="chart-info-btn" type="button" data-chart-info-title="Top Leitores" data-chart-info="Lista os leitores com mais empréstimos registrados." aria-label="Informações sobre Top Leitores" title="Sobre este gráfico">i</button>
-              </div>
-              <div class="list-chart" id="readerChart"></div>
-            </div>
-
-            <div class="panel chart-panel">
-              <div class="panel-head">
-                <h3>Empréstimos por mês</h3>
-                <button class="chart-info-btn" type="button" data-chart-info-title="Empréstimos por mês" data-chart-info="Conta os empréstimos registrados em cada mês do ano atual, pela data de criação do empréstimo." aria-label="Informações sobre Empréstimos por mês" title="Sobre este gráfico">i</button>
-              </div>
-              <div class="bar-chart" id="monthlyLoanChart"></div>
-            </div>
-
-            <div class="panel chart-panel">
-              <div class="panel-head">
-                <h3>Perfil dos leitores</h3>
-                <button class="chart-info-btn" type="button" data-chart-info-title="Perfil dos leitores" data-chart-info="Mostra a quantidade de leitores cadastrados em cada perfil: alunos, professores e outros." aria-label="Informações sobre Perfil dos leitores" title="Sobre este gráfico">i</button>
-              </div>
-              <div class="donut-wrap" id="readerTypeDonut"></div>
-              <div class="status-legend" id="readerTypeLegend"></div>
-            </div>
-
-            <div class="panel chart-panel">
-              <div class="panel-head">
-                <h3>Livros mais emprestados</h3>
-                <button class="chart-info-btn" type="button" data-chart-info-title="Livros mais emprestados" data-chart-info="Lista os cinco títulos com mais registros de empréstimo." aria-label="Informações sobre Livros mais emprestados" title="Sobre este gráfico">i</button>
-              </div>
-              <div class="bar-chart" id="topBooksChart"></div>
-            </div>
-
-            <div class="panel chart-panel">
-              <div class="panel-head">
-                <h3>Empréstimos por perfil</h3>
-                <button class="chart-info-btn" type="button" data-chart-info-title="Empréstimos por perfil" data-chart-info="Compara os empréstimos ativos de alunos com os de professores e outros leitores." aria-label="Informações sobre Empréstimos por perfil" title="Sobre este gráfico">i</button>
-              </div>
-              <div class="bar-chart" id="loansByReaderTypeChart"></div>
-            </div>
-          </div>
 
           <div class="admin-tabs">
             <div class="admin-back-row">
@@ -467,6 +368,105 @@
             </div>
 
           </div>
+
+          <section class="dashboard-export panel" aria-label="Exportar gráficos e relatórios">
+            <div class="dashboard-export-heading">
+              <div>
+                <h3>Exportações do painel</h3>
+                <p>Escolha o período e baixe os gráficos gerais ou o relatório da biblioteca.</p>
+              </div>
+              <label class="dashboard-period">
+                <span>Período</span>
+                <select id="dashboardExportPeriod">
+                  <option value="7">Semanal — últimos 7 dias</option>
+                  <option value="15">Quinzenal — últimos 15 dias</option>
+                  <option value="30" selected>Mensal — últimos 30 dias</option>
+                  <option value="90">Trimestral — últimos 90 dias</option>
+                  <option value="365">Anual — últimos 365 dias</option>
+                  <option value="all">Todo o período</option>
+                </select>
+              </label>
+            </div>
+            <div class="dashboard-export-actions">
+              <div class="dashboard-export-group">
+                <strong>Gráficos gerais</strong>
+                <button class="btn btn-secondary" id="downloadDashboardJpgBtn" type="button">Baixar gráficos JPG</button>
+                <button class="btn btn-secondary" id="downloadDashboardPdfBtn" type="button">Baixar gráficos PDF</button>
+              </div>
+              <div class="dashboard-export-group">
+                <strong>Relatório</strong>
+                <button class="btn btn-primary" id="downloadDashboardReportBtn" type="button">Baixar relatório PDF</button>
+              </div>
+            </div>
+          </section>
+
+          <div class="dashboard-grid">
+            <div class="panel chart-panel">
+              <div class="panel-head">
+                <h3>Top 5 Gêneros</h3>
+                <button class="chart-info-btn" type="button" data-chart-info-title="Top 5 Gêneros" data-chart-info="Mostra as cinco categorias com mais livros cadastrados no acervo." aria-label="Informações sobre Top 5 Gêneros" title="Sobre este gráfico">i</button>
+              </div>
+              <div class="bar-chart compact" id="genreChart"></div>
+            </div>
+
+            <div class="panel chart-panel">
+              <div class="panel-head">
+                <h3>Status do Acervo</h3>
+                <button class="chart-info-btn" type="button" data-chart-info-title="Status do Acervo" data-chart-info="Compara a quantidade de exemplares disponíveis com a quantidade emprestada." aria-label="Informações sobre Status do Acervo" title="Sobre este gráfico">i</button>
+              </div>
+              <div class="donut-wrap" id="statusDonut"></div>
+              <div class="status-legend" id="statusLegend"></div>
+            </div>
+
+            <div class="panel chart-panel">
+              <div class="panel-head">
+                <h3>Empréstimos por Curso/Turma</h3>
+                <button class="chart-info-btn" type="button" data-chart-info-title="Empréstimos por Curso/Turma" data-chart-info="Agrupa os empréstimos ativos pelo curso ou turma dos leitores." aria-label="Informações sobre Empréstimos por Curso/Turma" title="Sobre este gráfico">i</button>
+              </div>
+              <div class="bar-chart" id="courseChart"></div>
+            </div>
+
+            <div class="panel chart-panel">
+              <div class="panel-head">
+                <h3>Top Leitores</h3>
+                <button class="chart-info-btn" type="button" data-chart-info-title="Top Leitores" data-chart-info="Lista os leitores com mais empréstimos registrados." aria-label="Informações sobre Top Leitores" title="Sobre este gráfico">i</button>
+              </div>
+              <div class="list-chart" id="readerChart"></div>
+            </div>
+
+            <div class="panel chart-panel">
+              <div class="panel-head">
+                <h3>Empréstimos por mês</h3>
+                <button class="chart-info-btn" type="button" data-chart-info-title="Empréstimos por mês" data-chart-info="Conta os empréstimos registrados em cada mês do ano atual, pela data de criação do empréstimo." aria-label="Informações sobre Empréstimos por mês" title="Sobre este gráfico">i</button>
+              </div>
+              <div class="bar-chart" id="monthlyLoanChart"></div>
+            </div>
+
+            <div class="panel chart-panel">
+              <div class="panel-head">
+                <h3>Perfil dos leitores</h3>
+                <button class="chart-info-btn" type="button" data-chart-info-title="Perfil dos leitores" data-chart-info="Mostra a quantidade de leitores cadastrados em cada perfil: alunos, professores e outros." aria-label="Informações sobre Perfil dos leitores" title="Sobre este gráfico">i</button>
+              </div>
+              <div class="donut-wrap" id="readerTypeDonut"></div>
+              <div class="status-legend" id="readerTypeLegend"></div>
+            </div>
+
+            <div class="panel chart-panel">
+              <div class="panel-head">
+                <h3>Livros mais emprestados</h3>
+                <button class="chart-info-btn" type="button" data-chart-info-title="Livros mais emprestados" data-chart-info="Lista os cinco títulos com mais registros de empréstimo." aria-label="Informações sobre Livros mais emprestados" title="Sobre este gráfico">i</button>
+              </div>
+              <div class="bar-chart" id="topBooksChart"></div>
+            </div>
+
+            <div class="panel chart-panel">
+              <div class="panel-head">
+                <h3>Empréstimos por perfil</h3>
+                <button class="chart-info-btn" type="button" data-chart-info-title="Empréstimos por perfil" data-chart-info="Compara os empréstimos ativos de alunos com os de professores e outros leitores." aria-label="Informações sobre Empréstimos por perfil" title="Sobre este gráfico">i</button>
+              </div>
+              <div class="bar-chart" id="loansByReaderTypeChart"></div>
+            </div>
+          </div>
             </div>
           </div>
         </section>
@@ -511,7 +511,7 @@
           <p class="modal-description">Acesso restrito à CREDE para configurar a escola e cadastrar contas locais.</p>
           <label>
             <span>Email administrativo CREDE</span>
-            <input type="email" value="admin@crede17.ce.gov.br" autocomplete="username" readonly />
+            <input id="credeEmailInput" type="email" autocomplete="username" required />
           </label>
           <label>
             <span>Senha</span>

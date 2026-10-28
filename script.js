@@ -14,8 +14,6 @@ import * as XLSX from 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm'
 const localStore = createLocalStore()
 const localData = createLocalDataApi(localStore)
 const { db, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc, query, where, onSnapshot, runTransaction, writeBatch, serverTimestamp, Timestamp, increment } = localData
-const LIBRIS_ADMIN_EMAIL = 'admin@crede17.ce.gov.br'
-
 const config = {
   organizationName: 'Libris',
   currentSchoolId: 'escola-padrao',
@@ -1303,7 +1301,7 @@ async function updateEmailCredentialStatus(elementId, schoolId = config.currentS
     return
   }
   if (!schoolId) {
-    status.textContent = 'Salve o identificador da escola para consultar o cofre seguro.'
+    status.textContent = 'Cadastre a escola para consultar o cofre seguro.'
     return
   }
 
@@ -1319,8 +1317,8 @@ async function updateEmailCredentialStatus(elementId, schoolId = config.currentS
 }
 
 async function removeSmtpPassword() {
-  const schoolId = $('#librisSchoolIdInput')?.value.trim().toLowerCase()
-  if (!schoolId) return toast('Informe o identificador da escola antes de remover a senha.', 'error')
+  const schoolId = $('#librisConfigForm')?.dataset.schoolId || ''
+  if (!schoolId) return toast('Cadastre a escola antes de remover a senha salva.', 'error')
   if (!isTauri()) return toast('O cofre de credenciais só está disponível no aplicativo desktop Libris.', 'error')
   if (!confirm('Remover a senha SMTP salva no cofre seguro deste computador?')) return
 
@@ -2666,7 +2664,7 @@ function setup() {
   if ($('#openCredeLoginBtn')) $('#openCredeLoginBtn').onclick = () => {
     if ($('#loginForm')) $('#loginForm').hidden = true
     if ($('#credeLoginForm')) $('#credeLoginForm').hidden = false
-    $('#credePasswordInput')?.focus()
+    $('#credeEmailInput')?.focus()
   }
   if ($('#backToLocalLoginBtn')) $('#backToLocalLoginBtn').onclick = () => {
     if ($('#credeLoginForm')) $('#credeLoginForm').hidden = true
@@ -2784,7 +2782,8 @@ function setup() {
    School settings
    ------------------------- */
 function fillLibrisConfigurationForm(school = {}) {
-  if ($('#librisSchoolIdInput')) $('#librisSchoolIdInput').value = school.id || ''
+  if ($('#librisConfigForm')) $('#librisConfigForm').dataset.schoolId = school.id || ''
+  if ($('#librisSchoolInepInput')) $('#librisSchoolInepInput').value = school.inep || ''
   if ($('#librisSchoolNameInput')) $('#librisSchoolNameInput').value = school.name || ''
   if ($('#librisCoordinationEmailInput')) $('#librisCoordinationEmailInput').value = school.coordinationEmail || ''
   if ($('#librisSmtpHostInput')) $('#librisSmtpHostInput').value = school.smtp?.host || ''
@@ -2821,13 +2820,29 @@ function addLocalAccountRow(email = '', id = '') {
   passwordInput.autocomplete = 'new-password'
   passwordInput.placeholder = id ? 'Nova senha (vazio mantém a atual)' : 'Defina uma senha (mínimo 8 caracteres)'
   passwordInput.setAttribute('aria-label', 'Senha da conta local')
+  passwordInput.dataset.localAccountPassword = ''
   passwordInput.required = !id
+  const passwordField = document.createElement('div')
+  passwordField.className = 'password-input'
+  const passwordToggle = document.createElement('button')
+  passwordToggle.type = 'button'
+  passwordToggle.className = 'password-toggle'
+  passwordToggle.textContent = '👁'
+  passwordToggle.setAttribute('aria-label', 'Mostrar senha')
+  passwordToggle.setAttribute('aria-pressed', 'false')
+  passwordToggle.onclick = () => {
+    const showing = passwordInput.type === 'password'
+    passwordInput.type = showing ? 'text' : 'password'
+    passwordToggle.setAttribute('aria-pressed', String(showing))
+    passwordToggle.setAttribute('aria-label', showing ? 'Ocultar senha' : 'Mostrar senha')
+  }
+  passwordField.append(passwordInput, passwordToggle)
   const removeButton = document.createElement('button')
   removeButton.type = 'button'
   removeButton.className = 'small-btn danger'
   removeButton.textContent = 'Apagar'
   removeButton.onclick = () => row.remove()
-  row.append(emailInput, passwordInput, removeButton)
+  row.append(emailInput, passwordField, removeButton)
   container.append(row)
 }
 
@@ -2864,9 +2879,9 @@ async function saveLibrisConfiguration(event) {
   event.preventDefault()
   if (state.profile?.role !== 'libris_admin') return toast('Somente a conta Libris pode alterar esta configuração.', 'error')
 
-  const schoolId = $('#librisSchoolIdInput')?.value.trim().toLowerCase()
+  const schoolInep = $('#librisSchoolInepInput')?.value.trim()
   const schoolName = $('#librisSchoolNameInput')?.value.trim()
-  if (!schoolId || !/^[a-z0-9_-]+$/.test(schoolId) || !schoolName) return toast('Informe um identificador válido e o nome da escola.', 'error')
+  if (!/^\d{8}$/.test(schoolInep) || !schoolName) return toast('Informe o código INEP com 8 dígitos e o nome da escola.', 'error')
   const smtpHost = $('#librisSmtpHostInput')?.value.trim() || ''
   const smtpPort = Number($('#librisSmtpPortInput')?.value || 587)
   const smtpUsername = $('#librisSmtpUsernameInput')?.value.trim() || ''
@@ -2881,30 +2896,28 @@ async function saveLibrisConfiguration(event) {
   const accounts = $$('[data-local-account-row]').map((row) => ({
     id: row.dataset.userId || '',
     email: row.querySelector('input[type="email"]')?.value.trim().toLowerCase() || '',
-    password: row.querySelector('input[type="password"]')?.value || ''
+    password: row.querySelector('[data-local-account-password]')?.value || ''
   }))
   if (!accounts.length || accounts.some((account) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(account.email))) return toast('Cadastre pelo menos uma conta com email válido.', 'error')
   if (new Set(accounts.map((account) => account.email)).size !== accounts.length) return toast('Cada email pode aparecer apenas uma vez.', 'error')
   if (accounts.some((account) => account.password && account.password.length < 8)) return toast('As senhas devem ter pelo menos 8 caracteres.', 'error')
 
-  const school = {
-    id: schoolId,
-    schoolId,
-    name: schoolName,
-    coordinationEmail: $('#librisCoordinationEmailInput')?.value.trim() || '',
-    smtp: { host: smtpHost, port: smtpPort, username: smtpUsername },
-    active: true,
-    updatedAt: new Date()
-  }
-
   try {
     const existingSchools = await localStore.list('schools')
-    if (existingSchools.length && !existingSchools.some((item) => item.id === schoolId)) {
-      return toast('Este computador já está configurado para outra escola. Não altere o identificador por aqui.', 'error')
-    }
+    const schoolId = existingSchools[0]?.id || schoolInep
     const existingSchool = existingSchools.find((item) => item.id === schoolId) || {}
     const existingSchoolSettings = { ...existingSchool }
     delete existingSchoolSettings.emailjs
+    const school = {
+      id: schoolId,
+      schoolId,
+      inep: schoolInep,
+      name: schoolName,
+      coordinationEmail: $('#librisCoordinationEmailInput')?.value.trim() || '',
+      smtp: { host: smtpHost, port: smtpPort, username: smtpUsername },
+      active: true,
+      updatedAt: new Date()
+    }
     const existingUsers = await localStore.list('users')
     const usersToSave = []
     for (const account of accounts) {
@@ -3140,14 +3153,14 @@ async function restoreLocalSession() {
 async function handleCredeLogin(event) {
   event.preventDefault()
   const button = $('#credeLoginBtn')
+  const email = $('#credeEmailInput')?.value.trim().toLowerCase() || ''
   const password = $('#credePasswordInput')?.value || ''
   loading(button, true, 'Validando acesso…')
   try {
     if (!auth) throw new Error('Autenticação administrativa indisponível. Verifique a configuração do Firebase.')
-    const result = await signInWithEmailAndPassword(auth, LIBRIS_ADMIN_EMAIL, password)
-    if (String(result.user.email || '').toLowerCase() !== LIBRIS_ADMIN_EMAIL) throw new Error('Esta conta não tem acesso à configuração local da CREDE.')
+    const result = await signInWithEmailAndPassword(auth, email, password)
     state.user = result.user
-    state.profile = { role: 'libris_admin', email: LIBRIS_ADMIN_EMAIL }
+    state.profile = { role: 'libris_admin', email: result.user.email || email }
     const schools = await localStore.list('schools')
     const school = schools[0] || {}
     fillLibrisConfigurationForm(school)

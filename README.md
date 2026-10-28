@@ -1,4 +1,4 @@
-# Libris 1.0.11
+# Libris 1.2.1
 
 Sistema escolar de biblioteca da CREDE, feito com HTML, CSS e JavaScript. Os dados operacionais ficam no IndexedDB da máquina da biblioteca.
 
@@ -20,9 +20,9 @@ Mantenha cópias dos arquivos antigos até confirmar a importação do CSV e tes
 
 ## Configuração Firebase
 
-1. No Firebase Console do projeto `librisce`, habilite **Authentication > Email/Password** para a conta administrativa CREDE. Adicione o domínio HTTPS publicado em **Authorized domains**.
-2. Em **Authentication > Users**, crie `admin@crede17.ce.gov.br` com uma senha nova, forte e exclusiva. A senha digitada no app é validada pelo Firebase Authentication; ela não está no código. Como a senha anterior foi compartilhada em conversa, não a reutilize.
-3. No computador da biblioteca, use **Configuração local (CREDE)** e entre com `admin@crede17.ce.gov.br` e a senha criada no Firebase.
+1. No Firebase Console do projeto `librisce`, habilite **Authentication > Email/Password** para as contas administrativas CREDE. Adicione o domínio HTTPS publicado em **Authorized domains**.
+2. Em **Authentication > Users**, cadastre cada email administrativo CREDE com sua própria senha forte. O acesso usa o email e a senha informados na tela **Configuração local (CREDE)**; as credenciais são validadas pelo Firebase Authentication e não ficam no código.
+3. No computador da biblioteca, use **Configuração local (CREDE)** e entre com um dos emails administrativos cadastrados no Firebase e sua senha correspondente. Cadastre somente contas autorizadas para administrar a configuração local.
 4. Cadastre a escola, o email da coordenação, as contas locais e as configurações SMTP institucionais. A senha de app é salva no cofre seguro do sistema no aplicativo desktop.
 
 As contas locais da escola são independentes do Firebase Authentication; a senha administrativa CREDE continua sendo gerenciada pelo Firebase.
@@ -50,7 +50,7 @@ Abra `http://localhost:8080` no Chromium. Não abra o HTML diretamente pelo gere
 
 ## Aplicativo desktop Tauri
 
-O desktop usa Tauri v2 e mantém a mesma interface web. A versão atual é 1.0.11. Para desenvolvimento, instale as dependências Linux do Tauri e execute `npm run tauri dev`. Para gerar o pacote Debian da versão atual, execute `npm run build:desktop`; o arquivo será criado em `src-tauri/target/release/bundle/deb/`.
+O desktop usa Tauri v2 e mantém a mesma interface web. A versão atual é 1.2.1. Para desenvolvimento, instale as dependências Linux do Tauri e execute `npm run tauri dev`. Para gerar o pacote Debian da versão atual, execute `npm run build:desktop`; o arquivo será criado em `src-tauri/target/release/bundle/deb/`.
 
 No Ubuntu, o build requer Rust/Cargo e os pacotes `build-essential`, `curl`, `wget`, `file`, `libssl-dev`, `libdbus-1-dev`, `libxdo-dev`, `librsvg2-dev` e `libwebkit2gtk-4.1-dev`. O serviço de credenciais do sistema (Secret Service) deve estar disponível para guardar a senha SMTP. O login CREDE, o acesso à câmera e o envio SMTP devem ser validados no WebView do sistema após a instalação.
 
@@ -82,5 +82,5 @@ O build copia doze arquivos necessários ao app: HTML, CSS, JavaScript, módulos
 
 - A autenticação CREDE ainda depende do Firebase Authentication por email/senha; o provedor Google é usado somente para autorização do Drive. Não há Client Secret no frontend.
 - A migração de dados existentes requer o arquivo de backup legado. O app não conecta ao Firestore.
-- O backup Drive não roda com o navegador fechado. Verifique o status semanalmente no computador da biblioteca.
+- A função agendada de backup no Drive, em `functions/`, consulta somente dados legados do Firestore; ela não inclui os dados atuais do IndexedDB local. Para proteger os dados atuais, gere o ZIP pelo aplicativo e teste a restauração periodicamente.
 - A validação automatizada cobre armazenamento e CSV. O login administrativo ainda precisa ser testado com a configuração Firebase do ambiente de produção.
