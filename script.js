@@ -10,6 +10,8 @@ import { createLocalStore } from './local-store.mjs'
 import { createLocalDataApi } from './local-data.mjs'
 import { createCoordinationEmailHtml, createStudentEmailHtml } from './email-templates.mjs'
 import { backupCollectionFiles, optionalBackupCollectionFiles, backupRecordFromRow, parseBackupCell, resolveLegacyCategory } from './csv-backup.mjs'
+import { isbnToEan13, normalizeIsbn } from './book-identifiers.mjs'
+import JsBarcode from 'jsbarcode'
 import * as XLSX from 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm'
 
 const localStore = createLocalStore()
@@ -305,6 +307,12 @@ function isStudentReader(reader) {
   return type === 'aluno' || role === 'student' || (!type && !role)
 }
 
+function isExplicitStudentReader(reader) {
+  const type = String(reader?.type || '').toLocaleLowerCase('pt-BR')
+  const role = String(reader?.role || '').toLocaleLowerCase('pt-BR')
+  return type === 'aluno' || role === 'student'
+}
+
 function isTeacherReader(reader) {
   const type = String(reader?.type || '').toLocaleLowerCase('pt-BR')
   const role = String(reader?.role || '').toLocaleLowerCase('pt-BR')
@@ -465,7 +473,12 @@ function renderDashboard() {
   const percent = total ? Math.round(free / total * 100) : 0
   if ($('#statusDonut')) $('#statusDonut').innerHTML = `<div class="donut" style="background:conic-gradient(var(--success) 0 ${percent}%,var(--warning) ${percent}% 100%)"><div class="donut-center">${percent}%</div></div>`
   if ($('#statusLegend')) $('#statusLegend').innerHTML = `<div class="legend-item"><span class="legend-dot success"></span>Disponíveis: ${free}</div><div class="legend-item"><span class="legend-dot warning"></span>Emprestados: ${Math.max(0, total - free)}</div>`
-  renderBars($('#courseChart'), countLoanCopies(active, (l) => l.readerCourse || 'Não informado').slice(0, 5))
+  const readersById = new Map(state.readers.map((reader) => [reader.id, reader]))
+  const activeStudentLoans = active.filter((loan) => {
+    const reader = readersById.get(loan.readerId)
+    return isExplicitStudentReader(reader)
+  })
+  renderBars($('#courseChart'), countLoanCopies(activeStudentLoans, (loan) => loan.readerCourse || 'Não informado').slice(0, 5))
   const top = countLoanCopies(state.loans, (l) => l.readerName || 'Leitor').slice(0, 5)
   if ($('#readerChart')) $('#readerChart').innerHTML = top.length ? top.map((x) => `<div class="list-item"><strong>${esc(x.label)}</strong><span>${x.value} exemplares</span></div>`).join('') : '<p class="empty-state">Sem dados.</p>'
 
@@ -529,7 +542,6 @@ function renderDashboard() {
     countLoanCopies(state.loans, (loan) => loan.bookTitle || loan.bookCode || 'Livro sem título').slice(0, 5)
   )
 
-  const readersById = new Map(state.readers.map((reader) => [reader.id, reader]))
   const activeLoansByReaderType = count(active, (loan) => {
     const reader = readersById.get(loan.readerId)
     return reader && isStudentReader(reader) ? 'Alunos' : 'Professores e outros'
@@ -568,7 +580,11 @@ function dashboardExportPeriod() {
 function dashboardExportData() {
   const period = dashboardExportPeriod()
   const readerById = new Map(state.readers.map((reader) => [reader.id, reader]))
-  const groupLoans = (keyForLoan) => countLoanCopies(period.loans, keyForLoan).slice(0, 5)
+  const groupLoans = (keyForLoan, loans = period.loans) => countLoanCopies(loans, keyForLoan).slice(0, 5)
+  const studentLoans = period.loans.filter((loan) => {
+    const reader = readerById.get(loan.readerId)
+    return isExplicitStudentReader(reader)
+  })
   const loanReaderType = (loan) => {
     const reader = readerById.get(loan.readerId)
     if (isStudentReader(reader)) return 'Alunos'
@@ -602,7 +618,7 @@ function dashboardExportData() {
         { label: 'Disponíveis', value: state.books.reduce((sum, book) => sum + Number(book.available || 0), 0) },
         { label: 'Emprestados', value: Math.max(0, state.books.reduce((sum, book) => sum + Number(book.total || 0), 0) - state.books.reduce((sum, book) => sum + Number(book.available || 0), 0)) }
       ] },
-      { title: 'Empréstimos por Curso/Turma', kind: 'bars', data: groupLoans((loan) => loan.readerCourse || 'Não informado') },
+      { title: 'Empréstimos por Curso/Turma', kind: 'bars', data: groupLoans((loan) => loan.readerCourse || 'Não informado', studentLoans) },
       { title: 'Top Leitores', kind: 'bars', data: groupLoans((loan) => loan.readerName || 'Leitor') },
       { title: 'Empréstimos por mês', kind: 'bars', data: monthlyBuckets.filter((bucket) => bucket.value > 0) },
       { title: 'Perfil dos leitores', kind: 'donut', data: [
@@ -884,6 +900,9 @@ async function addBook(event) {
   const title = $('#bookTitleInput')?.value.trim()
   const author = $('#bookAuthorInput')?.value.trim()
   const publisher = $('#bookPublisherInput')?.value.trim()
+  const isbnInput = $('#bookIsbnInput')?.value.trim() || ''
+  const isbn = normalizeIsbn(isbnInput)
+  if (isbnInput && !isbnToEan13(isbn)) return toast('Informe um ISBN-10 ou ISBN-13 válido.', 'error')
   const existingBook = editingId ? state.books.find((item) => item.id === editingId) : null
   const existingMeta = editingId ? { synopsis: existingBook?.synopsis || '', coverUrl: existingBook?.coverUrl || '' } : await lookupBookMetadata(title, author, publisher)
   const book = {
@@ -895,6 +914,7 @@ async function addBook(event) {
     shelf: $('#bookShelfInput')?.value.trim() || '',
     total: Number($('#bookQuantityInput')?.value || 1),
     tombamento: $('#bookTombamentoInput')?.value.trim() || '',
+    isbn,
     synopsis: existingMeta.synopsis,
     coverUrl: existingMeta.coverUrl
   }
@@ -1426,6 +1446,7 @@ const bookExportFields = [
   ['Disponíveis', 'available'],
   ['Total', 'total'],
   ['Tombamento', 'tombamento'],
+  ['ISBN', 'isbn'],
   ['Status', 'status'],
   ['ID da escola', 'schoolId'],
   ['Nome da escola', 'schoolName'],
@@ -1680,6 +1701,7 @@ const csvHeaderAliases = {
   disponiveis: ['disponiveis', 'quantidade disponivel', 'exemplares disponiveis'],
   total: ['total', 'quantidade', 'quantidade total', 'quantidade de exemplares', 'exemplares'],
   tombamento: ['tombamento', 'numero de tombamento', 'patrimonio'],
+  isbn: ['isbn', 'isbn 10', 'isbn 13', 'numero isbn'],
   sinopse: ['sinopse', 'synopsis'],
   capa: ['url da capa', 'capa url', 'cover url', 'coverurl'],
   schoolId: ['id da escola', 'school id', 'schoolid'],
@@ -1774,6 +1796,7 @@ async function importCsv(event) {
       const total = parseCsvInteger(valueAt(row, 'total'))
       const availableValue = valueAt(row, 'disponiveis')
       const available = availableValue ? parseCsvInteger(availableValue) : total
+      const isbn = normalizeIsbn(valueAt(row, 'isbn'))
       const yearValue = valueAt(row, 'ano')
       const year = yearValue ? parseCsvInteger(yearValue) : 0
       const sourceSchoolId = valueAt(row, 'schoolId')
@@ -1790,6 +1813,7 @@ async function importCsv(event) {
       else if (categoryResolution.error) rowErrors.push(categoryResolution.error)
       if (total === null || total < 1) rowErrors.push('total inválido')
       if (available === null || available > total) rowErrors.push('disponíveis deve estar entre 0 e o total')
+      if (isbn && !isbnToEan13(isbn)) rowErrors.push('ISBN inválido')
       if (year === null) rowErrors.push('ano inválido')
       if (createdAtValue && !createdAt) rowErrors.push('data de criação inválida')
       if (updatedAtValue && !updatedAt) rowErrors.push('data de atualização inválida')
@@ -1825,6 +1849,7 @@ async function importCsv(event) {
         available,
         total,
         tombamento: valueAt(row, 'tombamento'),
+        isbn,
         synopsis: valueAt(row, 'sinopse'),
         coverUrl: valueAt(row, 'capa'),
         status: available > 0 ? 'disponivel' : 'emprestado',
@@ -1984,7 +2009,7 @@ function resetAdminState() {
 
     const canvas = document.createElement('canvas')
     canvas.width = 1104
-    canvas.height = 600
+    canvas.height = 690
     const context = canvas.getContext('2d')
     if (!context) throw new Error('Não foi possível preparar a etiqueta.')
 
@@ -2016,17 +2041,50 @@ function resetAdminState() {
     drawWrappedLabelText(context, book.author || 'Autoria não informada', 58, 326, 650, 46, 2)
 
     context.fillStyle = '#1e5b3d'
-    context.font = '700 29px Arial, sans-serif'
-    context.fillText(String(book.categoryName || label(book.categoryId) || '').toLocaleUpperCase('pt-BR').slice(0, 42), 58, 424, 650)
-    context.fillStyle = '#4f6256'
-    context.font = '600 28px Arial, sans-serif'
-    context.fillText(`TOMB.: ${String(book.tombamento || '—').toLocaleUpperCase('pt-BR').slice(0, 32)}`, 58, 466, 650)
+    context.font = '700 27px Arial, sans-serif'
+    context.fillText(String(book.categoryName || label(book.categoryId) || '').toLocaleUpperCase('pt-BR').slice(0, 42), 58, 397, 650)
+
+    const tombamentoValue = String(book.tombamento || book.code || '').trim().toLocaleUpperCase('pt-BR')
+    const barcodeCanvas = document.createElement('canvas')
+    JsBarcode(barcodeCanvas, tombamentoValue, {
+      format: 'CODE128',
+      width: 8,
+      height: 65,
+      displayValue: true,
+      font: 'Arial',
+      fontSize: 42,
+      margin: 3,
+      textMargin: 2,
+      background: '#ffffff',
+      lineColor: '#24352b'
+    })
+    const tombamentoScale = Math.min(1, 650 / barcodeCanvas.width)
+    const tombamentoWidth = barcodeCanvas.width * tombamentoScale
+    context.drawImage(barcodeCanvas, 58, 405, tombamentoWidth, barcodeCanvas.height * tombamentoScale)
+
+    const ean13 = isbnToEan13(book.isbn)
+    if (ean13) {
+      const isbnCanvas = document.createElement('canvas')
+      JsBarcode(isbnCanvas, ean13, {
+        format: 'EAN13',
+        width: 8,
+        height: 65,
+        displayValue: true,
+        font: 'Arial',
+        fontSize: 42,
+        margin: 3,
+        textMargin: 2,
+        background: '#ffffff',
+        lineColor: '#24352b'
+      })
+      const isbnScale = Math.min(1, 650 / isbnCanvas.width)
+      const isbnWidth = isbnCanvas.width * isbnScale
+      context.drawImage(isbnCanvas, 58, 525, isbnWidth, isbnCanvas.height * isbnScale)
+    }
+
     context.fillStyle = '#718078'
-    context.font = '600 22px Arial, sans-serif'
-    context.fillText('CÓDIGO DO ACERVO', 58, 508)
-    context.fillStyle = '#24352b'
-    context.font = '700 52px Arial, sans-serif'
-    context.fillText(String(book.code || '').toLocaleUpperCase('pt-BR').slice(0, 18), 58, 566, 650)
+    context.font = '700 28px Arial, sans-serif'
+    context.fillText('TOMB/ISBN', 58, 680)
 
     context.fillStyle = '#ffffff'
     context.fillRect(744, 140, 350, 390)
@@ -2049,7 +2107,7 @@ function resetAdminState() {
     const list = $('#labelBookList')
     if (!list) return
     const queryText = ($('#labelBookSearchInput')?.value || '').trim().toLocaleLowerCase('pt-BR')
-    const books = state.books.filter((book) => !queryText || [book.title, book.author, book.code].some((value) => String(value || '').toLocaleLowerCase('pt-BR').includes(queryText)))
+    const books = state.books.filter((book) => !queryText || [book.title, book.author, book.code, book.tombamento, book.isbn].some((value) => String(value || '').toLocaleLowerCase('pt-BR').includes(queryText)))
 
     list.innerHTML = books.length ? books.map((book) => {
       const quantity = selectedLabelQuantities.get(book.id) || 1
@@ -2136,11 +2194,11 @@ function resetAdminState() {
       const dpi = 300
       const pxPerMm = dpi / 25.4
       const cardWidth = Math.round(90 * pxPerMm)
-      const cardHeight = Math.round(cardWidth * 600 / 1104)
+      const cardHeight = Math.round(cardWidth * 690 / 1104)
       const columnGap = Math.round(10 * pxPerMm)
-      const rowGap = Math.round(5 * pxPerMm)
+      const rowGap = Math.round(1 * pxPerMm)
       const leftMargin = Math.round(10 * pxPerMm)
-      const topMargin = Math.round(14 * pxPerMm)
+      const topMargin = Math.round(5 * pxPerMm)
       const sheet = document.createElement('canvas')
       sheet.width = 2480
       sheet.height = 3508
@@ -2176,11 +2234,11 @@ function resetAdminState() {
       const { jsPDF } = await import('https://cdn.jsdelivr.net/npm/jspdf@2.5.2/+esm')
       const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4', compress: true })
       const cardWidth = 90
-      const cardHeight = cardWidth * 600 / 1104
+      const cardHeight = cardWidth * 690 / 1104
       const columnGap = 10
-      const rowGap = 5
+      const rowGap = 1
       const leftMargin = 10
-      const topMargin = 14
+      const topMargin = 5
 
       let index = 0
       for (const { book, quantity } of entries) {
@@ -2302,6 +2360,7 @@ function editBook(id) {
   if ($('#bookShelfInput')) $('#bookShelfInput').value = book.shelf || ''
   if ($('#bookQuantityInput')) $('#bookQuantityInput').value = Number(book.total || 1)
   if ($('#bookTombamentoInput')) $('#bookTombamentoInput').value = book.tombamento || ''
+  if ($('#bookIsbnInput')) $('#bookIsbnInput').value = book.isbn || ''
   
   const titleHeader = $('#bookModalTitle')
   if (titleHeader) titleHeader.textContent = 'Editar livro'
@@ -2476,12 +2535,18 @@ function acceptScannedBook(rawValue) {
   const payloadSchoolId = payload?.schoolId || payload?.s
   const payloadBookId = payload?.bookId || payload?.b
   const payloadCode = payload?.code || payload?.c
-  const matchedCode = String(payloadCode || normalizedValue.match(/(?:^|[^A-Z0-9])([A-Z0-9]{1,4}-\d{4})(?:$|[^A-Z0-9])/i)?.[1] || normalizedValue).trim().toUpperCase()
+  const scannedValue = String(payloadCode || normalizedValue.match(/(?:^|[^A-Z0-9])([A-Z0-9]{1,4}-\d{4})(?:$|[^A-Z0-9])/i)?.[1] || normalizedValue).trim().toUpperCase()
+  const scannedIsbn = isbnToEan13(scannedValue)
   const bookById = payloadBookId
     ? state.books.find((item) => String(item.id) === String(payloadBookId))
     : null
-  const bookByCode = state.books.find((item) => String(item.code || '').trim().toUpperCase() === matchedCode)
-  const book = bookById || bookByCode
+  const bookByCode = state.books.find((item) => String(item.code || '').trim().toUpperCase() === scannedValue)
+  const bookByTombamento = state.books.find((item) => String(item.tombamento || '').trim().toUpperCase() === scannedValue)
+  const bookByIsbn = scannedIsbn
+    ? state.books.find((item) => isbnToEan13(item.isbn) === scannedIsbn)
+    : null
+  const book = bookById || bookByCode || bookByTombamento || bookByIsbn
+  const matchedCode = book?.code || scannedValue
   const scannedSchoolId = String(payloadSchoolId || '').trim().toLocaleLowerCase('pt-BR')
   const currentSchoolId = String(config.currentSchoolId || '').trim().toLocaleLowerCase('pt-BR')
 
@@ -2531,18 +2596,16 @@ async function startQrCamera() {
     qrScannerStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
     video.muted = true
     video.playsInline = true
-    video.srcObject = qrScannerStream
-    await video.play()
 
-    const { BrowserQRCodeReader } = await import('@zxing/browser')
-    const reader = new BrowserQRCodeReader()
+    const { BrowserMultiFormatReader } = await import('@zxing/browser')
+    const reader = new BrowserMultiFormatReader()
     qrScannerControls = await reader.decodeFromStream(
       qrScannerStream,
       video,
       (result, scanError, controls) => {
         if (result && acceptScannedBook(result.getText())) controls.stop()
         if (scanError && scanError.name !== 'NotFoundException') {
-          console.warn('Falha durante a leitura do QR code:', scanError)
+          console.warn('Falha durante a leitura do código:', scanError)
         }
       }
     )
@@ -2551,7 +2614,7 @@ async function startQrCamera() {
       cameraPermissionPending = false
     }
     qrScannerStream = video.srcObject
-    if (status) status.textContent = 'Aponte a câmera para o QR code do livro.'
+    if (status) status.textContent = 'Aponte a câmera para o QR code ou código de barras da etiqueta.'
   } catch (err) {
     if (isTauri() && cameraPermissionPending) {
       cameraPermissionPending = false
@@ -2563,13 +2626,16 @@ async function startQrCamera() {
     }
     stopQrScanner()
     console.error('Falha ao iniciar a câmera ou o leitor QR:', err)
+    const technicalDetail = [err?.name, err?.message].filter(Boolean).join(': ')
     const message = err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError'
       ? 'A câmera foi bloqueada. Feche outros aplicativos que a estejam usando e permita o acesso nas configurações do sistema.'
       : err?.name === 'NotFoundError' || err?.name === 'DevicesNotFoundError'
         ? 'Nenhuma câmera foi encontrada neste dispositivo.'
-        : 'Erro ao acessar a câmera. Verifique as permissões ou use o leitor USB.'
+        : err?.name === 'AbortError'
+          ? `O WebView interrompeu a reprodução do vídeo${technicalDetail ? ` (${technicalDetail})` : ''}. Feche e abra o leitor novamente; se persistir, verifique o WebView/GTK.`
+          : `Falha ao iniciar a câmera${technicalDetail ? ` (${technicalDetail})` : ''}. Verifique as permissões ou use o leitor USB.`
     if (status) status.textContent = message
-    toast('Erro ao acessar a câmera. Verifique as permissões ou use o leitor USB.', 'error')
+    toast(message, 'error')
   }
 }
 

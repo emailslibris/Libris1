@@ -62,7 +62,7 @@
         <section class="modal-card small" role="dialog" aria-modal="true" aria-labelledby="aboutModalTitle">
           <button class="modal-close" type="button" data-close="aboutModal" aria-label="Fechar">×</button>
           <h3 id="aboutModalTitle">Sobre o Libris</h3>
-          <p class="modal-description">Sistema de gestão para bibliotecas escolares, versão 1.2.2.</p>
+          <p class="modal-description">Sistema de gestão para bibliotecas escolares, versão 1.2.7.</p>
           <dl class="about-details">
             <div><dt>Desenvolvimento</dt><dd>Vinicius e Alyssa</dd></div>
             <div><dt>Tecnologias</dt><dd>HTML, CSS, JavaScript e Rust (Tauri)</dd></div>
@@ -88,7 +88,7 @@
           </details>
           <details class="help-item">
             <summary>Posso usar um leitor de código de barras?</summary>
-            <p>Sim. Leitores USB que funcionam como teclado podem inserir o código no campo ID do livro. A câmera QR também pode ser usada quando disponível.</p>
+            <p>Sim. Leitores USB 1D que funcionam como teclado podem inserir Tom/ISBN em Code 128 ou EAN-13 no campo do livro. A câmera também lê esses códigos e o QR da etiqueta.</p>
           </details>
           <details class="help-item">
             <summary>Como registro a devolução ou renovação?</summary>
@@ -216,7 +216,7 @@
                       <input
                         id="bookCodeInput"
                         type="text"
-                        placeholder="Digite ou escaneie (ex.: LI-0002)"
+                        placeholder="Digite ou escaneie Tom/ISBN (ex.: LI-0002)"
                         autocomplete="off"
                       />
                       <button type="button" class="btn btn-ghost" id="scanBtn" aria-label="Usar câmera para escanear o código" title="Usar câmera">📷</button>
@@ -616,7 +616,7 @@
               <span id="labelSelectionCount">0 selecionados</span>
             </div>
             <div id="labelPreviewEmpty" class="label-preview-empty">Selecione pelo menos um livro para visualizar a etiqueta.</div>
-            <canvas id="labelPreviewCanvas" class="label-preview-canvas" width="1104" height="600" hidden></canvas>
+            <canvas id="labelPreviewCanvas" class="label-preview-canvas" width="1104" height="690" hidden></canvas>
             <p id="labelPreviewCaption" class="label-preview-caption" hidden></p>
           </section>
         </div>
@@ -684,7 +684,7 @@
       <div class="modal-card small qr-modal-card" role="dialog" aria-modal="true" aria-labelledby="qrScannerTitle">
         <button class="modal-close" type="button" data-close="qrScannerModal" aria-label="Fechar leitor de câmera">×</button>
         <h3 id="qrScannerTitle">Escanear código do livro</h3>
-        <p class="modal-description">Aponte a câmera para o QR code da etiqueta do livro.</p>
+        <p class="modal-description">Aponte a câmera para o QR code ou para o Tom/ISBN da etiqueta.</p>
         <video id="qrScannerVideo" class="qr-scanner-video" autoplay muted playsinline></video>
         <p id="qrScannerStatus" class="scanner-status" role="status" aria-live="polite">
           Solicitando acesso à câmera…
@@ -733,8 +733,12 @@
             <input id="bookQuantityInput" type="number" min="1" value="1" required />
           </label>
           <label>
-            <span>Número de tombamento</span>
+            <span>Tom/ISBN · Tombamento</span>
             <input id="bookTombamentoInput" type="text" />
+          </label>
+          <label>
+            <span>Tom/ISBN · ISBN (10 ou 13 dígitos)</span>
+            <input id="bookIsbnInput" type="text" inputmode="numeric" autocomplete="off" placeholder="Ex.: 9780306406157" />
           </label>
           <div style="display:flex; justify-content:flex-end; gap:0.5rem; grid-column: 1 / -1; margin-top: 1rem;">
             <input id="bookIdInput" type="hidden" />

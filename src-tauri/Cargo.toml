@@ -1,6 +1,6 @@
 [package]
 name = "libris"
-version = "1.2.2"
+version = "1.2.7"
 description = "Biblioteca escolar Libris"
 edition = "2021"
 
