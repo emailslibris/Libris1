@@ -2,8 +2,9 @@
 
 use keyring::Entry;
 use lettre::{
-    message::Mailbox, transport::smtp::authentication::Credentials, Message, SmtpTransport,
-    Transport,
+    message::{header::ContentType, Mailbox, MultiPart, SinglePart},
+    transport::smtp::authentication::Credentials,
+    Message, SmtpTransport, Transport,
 };
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -99,6 +100,7 @@ async fn send_email(
     recipient: String,
     subject: String,
     body: String,
+    html_body: String,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         send_email_blocking(
@@ -109,6 +111,7 @@ async fn send_email(
             recipient,
             subject,
             body,
+            html_body,
         )
     })
     .await
@@ -123,6 +126,7 @@ fn send_email_blocking(
     recipient: String,
     subject: String,
     body: String,
+    html_body: String,
 ) -> Result<(), String> {
     if smtp_host.is_empty()
         || smtp_host.len() > 253
@@ -145,6 +149,7 @@ fn send_email_blocking(
             .chars()
             .any(|character| character == '\r' || character == '\n')
         || body.len() > 100_000
+        || html_body.len() > 500_000
     {
         return Err("Assunto ou corpo do e-mail inválido.".into());
     }
@@ -166,7 +171,19 @@ fn send_email_blocking(
         .from(sender)
         .to(recipient)
         .subject(subject)
-        .body(body)
+        .multipart(
+            MultiPart::alternative()
+                .singlepart(
+                    SinglePart::builder()
+                        .header(ContentType::TEXT_PLAIN)
+                        .body(body),
+                )
+                .singlepart(
+                    SinglePart::builder()
+                        .header(ContentType::TEXT_HTML)
+                        .body(html_body),
+                ),
+        )
         .map_err(|error| format!("Não foi possível montar o e-mail: {error}"))?;
 
     let mailer = match smtp_port {

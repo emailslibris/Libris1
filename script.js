@@ -8,6 +8,7 @@ import { writeFile } from '@tauri-apps/plugin-fs'
 import { open } from '@tauri-apps/plugin-shell'
 import { createLocalStore } from './local-store.mjs'
 import { createLocalDataApi } from './local-data.mjs'
+import { createCoordinationEmailHtml, createStudentEmailHtml } from './email-templates.mjs'
 import { backupCollectionFiles, optionalBackupCollectionFiles, backupRecordFromRow, parseBackupCell, resolveLegacyCategory } from './csv-backup.mjs'
 import * as XLSX from 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm'
 
@@ -1239,7 +1240,7 @@ async function logSentEmail(recipient, subject) {
   await Promise.all(schoolLogs.slice(EMAIL_AUDIT_LIMIT).map((record) => localStore.remove('email_logs', record.id)))
 }
 
-async function sendEmailNotification(recipient, subject, message) {
+async function sendEmailNotification(recipient, subject, message, htmlBody) {
   const email = String(recipient || '').trim()
   const smtp = config.smtp || {}
   if (!email) {
@@ -1263,7 +1264,8 @@ async function sendEmailNotification(recipient, subject, message) {
       smtpUsername: smtp.username,
       recipient: email,
       subject,
-      body: message
+      body: message,
+      htmlBody
     })
   } catch (err) {
     console.error('Falha no envio SMTP:', err)
@@ -1280,10 +1282,10 @@ async function sendEmailNotification(recipient, subject, message) {
   }
 }
 
-async function sendEmailFromButton(button, recipient, subject, message) {
+async function sendEmailFromButton(button, recipient, subject, message, htmlBody) {
   loading(button, true, 'Enviando…')
   try {
-    return await sendEmailNotification(recipient, subject, message)
+    return await sendEmailNotification(recipient, subject, message, htmlBody)
   } finally {
     loading(button, false)
   }
@@ -1354,8 +1356,22 @@ async function triggerNotification(type) {
       email: coordEmail 
     }
 
+    const subject = `Empréstimo em atraso - ${config.schoolName}`
     const coordinationMessage = `Olá, coordenação. O empréstimo de ${loanQuantity(loan)} exemplar(es) do livro "${loan.bookTitle}" para o(a) leitor(a) ${loan.readerName} está em atraso desde ${formatDate(loan.dueAt)}.`
-    const result = await sendEmailFromButton($('#sendCoordinationBtn'), coordination.email, `Empréstimo em atraso - ${config.schoolName}`, coordinationMessage)
+    const dueDate = date(loan.dueAt)
+    const daysOverdue = dueDate && !Number.isNaN(dueDate.getTime())
+      ? Math.max(0, Math.ceil((Date.now() - dueDate.getTime()) / 86400000))
+      : 0
+    const htmlBody = createCoordinationEmailHtml({
+      subject,
+      schoolName: config.schoolName,
+      message: coordinationMessage,
+      readerName: loan.readerName,
+      bookTitle: loan.bookTitle,
+      dueDate: formatDate(loan.dueAt),
+      daysOverdue
+    })
+    const result = await sendEmailFromButton($('#sendCoordinationBtn'), coordination.email, subject, coordinationMessage, htmlBody)
 
     if (!result.sent) return
     toast(result.audited ? 'Aviso enviado à coordenação com sucesso!' : 'Aviso enviado, mas o registro local de auditoria falhou.')
@@ -1376,7 +1392,16 @@ async function triggerNotification(type) {
     return toast(`O leitor ${reader.name} não possui e-mail cadastrado na aba Leitores.`, 'error')
   }
 
-  const result = await sendEmailFromButton($('#sendEmailBtn'), reader.email, `Aviso da biblioteca - ${config.schoolName}`, message)
+  const subject = `Aviso da biblioteca - ${config.schoolName}`
+  const htmlBody = createStudentEmailHtml({
+    subject,
+    schoolName: config.schoolName,
+    message,
+    bookTitle: loan.bookTitle,
+    dueDate: formatDate(loan.dueAt),
+    loanDays: Number(loan.days || 7)
+  })
+  const result = await sendEmailFromButton($('#sendEmailBtn'), reader.email, subject, message, htmlBody)
 
   if (!result.sent) return
   toast(result.audited ? 'E-mail enviado ao leitor com sucesso!' : 'E-mail enviado, mas o registro local de auditoria falhou.')
